@@ -1,0 +1,28 @@
+{
+  "6679042143": {
+    "sites": {
+      "https://brooklynautismcenter.org": {
+        "accounts": [
+          {
+            "email": "lvidor44r6@gmail.com",
+            "username": "user_825bhklg",
+            "password": "4dg7c12n7vkf"
+          }
+        ],
+        "cookies": {
+          "wp_woocommerce_session_56d52c8d6fd34613e78cc003f59b47ef": "t_4c825372a5df5c291b0a73a30fbb84%7C%7C1761558378%7C%7C1761554778%7C%7C0c5078d5adb78ea30e845332733a457f"
+        },
+        "raw_cookies": {
+          "wp_woocommerce_session_56d52c8d6fd34613e78cc003f59b47ef": "t_4c825372a5df5c291b0a73a30fbb84%7C%7C1761558378%7C%7C1761554778%7C%7C0c5078d5adb78ea30e845332733a457f"
+        },
+        "cookies_valid": false,
+        "payment_count": 3,
+        "mode": "rotate",
+        "pk": null,
+        "pk_usage": 0,
+        "stripe_pk": "pk_live_X6M1PE2fcjdySGwJ7Y3WBLeQ",
+        "stripe_nonce": "b062f4a3e9"
+      }
+    }
+  }
+}

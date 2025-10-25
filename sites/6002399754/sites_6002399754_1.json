@@ -1,0 +1,21 @@
+{
+  "6002399754": {
+    "sites": {
+      "https://www.seed2design.co.uk": {
+        "accounts": [
+          {
+            "email": "h27sntm996@gmail.com",
+            "username": "user_rtdknrwk",
+            "password": "84zjfre5jwe2"
+          }
+        ],
+        "cookies": {},
+        "payment_count": 4,
+        "mode": "rotate",
+        "raw_cookies": {},
+        "stripe_pk": "pk_live_DnbcM6ZBIkz7SrTH7W6jTzoI",
+        "stripe_nonce": "6d2ce493c6"
+      }
+    }
+  }
+}

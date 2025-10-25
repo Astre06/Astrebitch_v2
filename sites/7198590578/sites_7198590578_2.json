@@ -1,0 +1,241 @@
+{
+  "7198590578": {
+    "sites": {
+      "https://www.lafine.com.au/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://brooklynautismcenter.org/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://bleurart.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://genesisadmissions.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://thektlg.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://karenstampercollage.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://meslo.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://qissa.com.au/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://www.albatrossparagliding.co.uk/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://branding.wequal.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://thektlg.com": {
+        "accounts": [
+          {
+            "email": "obcjh9twra@gmail.com",
+            "username": "user_r60tmgye",
+            "password": "sf2z9je8rfnw"
+          }
+        ],
+        "cookies": {
+          "mailchimp_landing_site": "https%3A%2F%2Fthektlg.com%2Fmy-account%2F"
+        },
+        "payment_count": 10,
+        "mode": "rotate",
+        "raw_cookies": {
+          "mailchimp_landing_site": "https%3A%2F%2Fthektlg.com%2Fmy-account%2F"
+        },
+        "cookies_valid": true,
+        "stripe_pk": "pk_test_51PlE4mFIwXiG2DXuX1DST9QqdzMT2zLImmsJlSqTo3CwV8c4YZZsg0mRTJvGpcDZsm4ozjRMoLDZBKym671VqI7x00A6W7IuW2",
+        "stripe_nonce": "9c01560194"
+      },
+      "https://bleurart.com": {
+        "accounts": [
+          {
+            "email": "mivgyg7wju@gmail.com",
+            "username": "user_i316brl2",
+            "password": "1yyw9ot22c32"
+          }
+        ],
+        "cookies": {
+          "wordpress_sec_6b2812adfdd31147aa1a0febb756b2d5": "mivgyg7wju%7C1762596813%7CAYOV65ZYV1ONwIueC61WSrtkfcBfCrmC1YzIa1LTGw4%7Ca0f49d6b58035f6916d9d566c9d246f39825a76f4d0831da3639db923999e9c4",
+          "wordpress_logged_in_6b2812adfdd31147aa1a0febb756b2d5": "mivgyg7wju%7C1762596813%7CAYOV65ZYV1ONwIueC61WSrtkfcBfCrmC1YzIa1LTGw4%7C66b7ae2a8c25720fad093af8fd036aa026c55b1f93e68e3c166682e10d3fd2c9",
+          "_fbp": "fb.1.1761388252656.1605422111.AQ"
+        },
+        "payment_count": 14,
+        "mode": "rotate",
+        "raw_cookies": {
+          "wordpress_sec_6b2812adfdd31147aa1a0febb756b2d5": "mivgyg7wju%7C1762596813%7CAYOV65ZYV1ONwIueC61WSrtkfcBfCrmC1YzIa1LTGw4%7Ca0f49d6b58035f6916d9d566c9d246f39825a76f4d0831da3639db923999e9c4",
+          "wordpress_logged_in_6b2812adfdd31147aa1a0febb756b2d5": "mivgyg7wju%7C1762596813%7CAYOV65ZYV1ONwIueC61WSrtkfcBfCrmC1YzIa1LTGw4%7C66b7ae2a8c25720fad093af8fd036aa026c55b1f93e68e3c166682e10d3fd2c9"
+        },
+        "cookies_valid": true,
+        "stripe_pk": "pk_live_51ETDmyFuiXB5oUVxaIafkGPnwuNcBxr1pXVhvLJ4BrWuiqfG6SldjatOGLQhuqXnDmgqwRA7tDoSFlbY4wFji7KR0079TvtxNs",
+        "stripe_nonce": "aa1730a60f"
+      },
+      "https://branding.wequal.com": {
+        "accounts": [
+          {
+            "email": "a7olylvizv@gmail.com",
+            "username": "user_rn1toaee",
+            "password": "vw1oby1baqq1"
+          }
+        ],
+        "cookies": {},
+        "payment_count": 1,
+        "mode": "rotate",
+        "raw_cookies": {},
+        "stripe_pk": "pk_live_51Om0YGS7CuEmRemywqrkbSi03TDKvY6Iw665bEcCIktgPqwx4SltAImBodh79LgQLZotev6rre91g9MfCEM4xy1100yqetGlTC",
+        "stripe_nonce": "755043d3bc"
+      },
+      "https://www.albatrossparagliding.co.uk": {
+        "accounts": [
+          {
+            "email": "0cse57u55v@gmail.com",
+            "username": "user_idaible6",
+            "password": "7tpreeracgje"
+          }
+        ],
+        "cookies": {},
+        "payment_count": 9,
+        "mode": "rotate",
+        "raw_cookies": {},
+        "stripe_pk": "pk_live_51JDQbzS0hZurgJaBQqwTH5JSmI7juQ4SC1Dx6kApBZS7590y3dxyii7qpMSzccbJCo9WHVppEOTD4IyF71bIavmX00olMElOPD",
+        "stripe_nonce": "764261c40e"
+      },
+      "https://www.lafine.com.au": {
+        "accounts": [
+          {
+            "email": "3y77aaw1m8@gmail.com",
+            "username": "user_jbqjoxka",
+            "password": "7d5hudzovsxs"
+          }
+        ],
+        "cookies": {},
+        "payment_count": 9,
+        "mode": "rotate",
+        "raw_cookies": {},
+        "stripe_pk": "pk_live_tGC5WXjjVxeEuQhcUQiqY12D",
+        "stripe_nonce": "7d94df95b3"
+      },
+      "https://karenstampercollage.com": {
+        "accounts": [
+          {
+            "email": "cynra61o7k@gmail.com",
+            "username": "user_5eg41b06",
+            "password": "jz3p2uvza4tl"
+          }
+        ],
+        "cookies": {},
+        "payment_count": 15,
+        "mode": "rotate",
+        "raw_cookies": {},
+        "stripe_pk": "pk_live_r2ddvqvelpLF7vhoNYOUDket",
+        "stripe_nonce": "5974e15790"
+      },
+      "https://genesisadmissions.com": {
+        "accounts": [
+          {
+            "email": "a22nrz1q7o@gmail.com",
+            "username": "user_92a4f0fp",
+            "password": "7j7fowbx8v4l"
+          }
+        ],
+        "cookies": {
+          "lp_session_guest": "g-68fca334e0ba3",
+          "PHPSESSID": "4v8kgpihai9i7he8mpb7qihfq3",
+          "wordpress_logged_in_7d41a6d42c153307d0c111379ebd73b8": "a22nrz1q7o%7C1762596930%7CGr9Cb4KCTBdzO23kdGa8HFSSROTJvq4W8EOQ3uEz9AS%7Cddff1cad34d9d84dc89503d4923c5ac128dbe385e994a431b49cc2b448e263cd",
+          "wordpress_sec_7d41a6d42c153307d0c111379ebd73b8": "a22nrz1q7o%7C1762596930%7CGr9Cb4KCTBdzO23kdGa8HFSSROTJvq4W8EOQ3uEz9AS%7C98654254bc63402a2c8a4cbc7cb64a2a2584ecc91b5fd0e44fa872fed6a2f002"
+        },
+        "payment_count": 4,
+        "mode": "rotate",
+        "raw_cookies": {
+          "lp_session_guest": "g-68fca334e0ba3",
+          "PHPSESSID": "4v8kgpihai9i7he8mpb7qihfq3",
+          "wordpress_logged_in_7d41a6d42c153307d0c111379ebd73b8": "a22nrz1q7o%7C1762596930%7CGr9Cb4KCTBdzO23kdGa8HFSSROTJvq4W8EOQ3uEz9AS%7Cddff1cad34d9d84dc89503d4923c5ac128dbe385e994a431b49cc2b448e263cd",
+          "wordpress_sec_7d41a6d42c153307d0c111379ebd73b8": "a22nrz1q7o%7C1762596930%7CGr9Cb4KCTBdzO23kdGa8HFSSROTJvq4W8EOQ3uEz9AS%7C98654254bc63402a2c8a4cbc7cb64a2a2584ecc91b5fd0e44fa872fed6a2f002"
+        },
+        "cookies_valid": true,
+        "stripe_pk": "pk_live_51P1IHI03l8jXIw0z2s5Yjk4kOEDK1WinvzrfJkI6dBTXeqFxc5EJgUfOQr3y5tKxY8nK2xQGX6a5FBoNWdgj6QVH0085YH5WHt",
+        "stripe_nonce": "05af51a5a9"
+      },
+      "https://qissa.com.au": {
+        "accounts": [
+          {
+            "email": "cbakq44e7v@gmail.com",
+            "username": "user_ea6sh5vg",
+            "password": "44qyyot9qvch"
+          }
+        ],
+        "cookies": {
+          "mailchimp_landing_site": "https%3A%2F%2Fqissa.com.au%2Fmy-account%2F"
+        },
+        "payment_count": 7,
+        "mode": "rotate",
+        "raw_cookies": {
+          "mailchimp_landing_site": "https%3A%2F%2Fqissa.com.au%2Fmy-account%2F"
+        },
+        "stripe_pk": "pk_live_51P8JSjEDxuqucW2nrEBmPS3Kp1G0LCaAEyXNAQ8JhDr9UtGlKCSDXBc4xo2jrG9ntu37i0Y95y0FOhQMj5NC2bDY00S0JR1huW",
+        "stripe_nonce": "83219fa50d",
+        "cookies_valid": true
+      },
+      "https://meslo.com": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 1,
+        "mode": "rotate"
+      },
+      "https://brooklynautismcenter.org": {
+        "accounts": [
+          {
+            "email": "d2mozsuat9@gmail.com",
+            "username": "user_vsudab4p",
+            "password": "vgck57fkjced"
+          }
+        ],
+        "cookies": {
+          "wp_woocommerce_session_56d52c8d6fd34613e78cc003f59b47ef": "t_bbd840ee624843eacd9420b65e1952%7C%7C1761560377%7C%7C1761556777%7C%7C8f00e961b69182f83359bebd6c2ff650"
+        },
+        "payment_count": 5,
+        "mode": "rotate",
+        "raw_cookies": {
+          "wp_woocommerce_session_56d52c8d6fd34613e78cc003f59b47ef": "t_bbd840ee624843eacd9420b65e1952%7C%7C1761560377%7C%7C1761556777%7C%7C8f00e961b69182f83359bebd6c2ff650"
+        },
+        "stripe_pk": "pk_live_X6M1PE2fcjdySGwJ7Y3WBLeQ",
+        "stripe_nonce": "b062f4a3e9",
+        "cookies_valid": false
+      }
+    }
+  }
+}

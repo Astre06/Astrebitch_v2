@@ -1,0 +1,91 @@
+{
+  "7198590578": {
+    "sites": {
+      "https://www.lafine.com.au/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://brooklynautismcenter.org/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://bleurart.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://genesisadmissions.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://thektlg.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://karenstampercollage.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://meslo.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://qissa.com.au/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://www.albatrossparagliding.co.uk/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://branding.wequal.com/my-account/add-payment-method/": {
+        "accounts": [],
+        "cookies": null,
+        "payment_count": 0,
+        "mode": "rotate"
+      },
+      "https://genesisadmissions.com": {
+        "accounts": [
+          {
+            "email": "kq6emv3fai@gmail.com",
+            "username": "user_av9pvh3c",
+            "password": "95ut2mwmwj0y"
+          }
+        ],
+        "cookies": {
+          "lp_session_guest": "g-68fcd15370570",
+          "PHPSESSID": "k04k203c998mo0hldd5s2b0tki",
+          "wordpress_logged_in_7d41a6d42c153307d0c111379ebd73b8": "kq6emv3fai%7C1762608732%7CxDXKxu9sfRDLNcPkr8FC74Uet9gNoR8osiS44iULIaJ%7Cc50951d46453227cd86aa1b65f3828ef5d3bcee1dcbe159895193895ba8ec0da",
+          "wordpress_sec_7d41a6d42c153307d0c111379ebd73b8": "kq6emv3fai%7C1762608732%7CxDXKxu9sfRDLNcPkr8FC74Uet9gNoR8osiS44iULIaJ%7C88f10d1f3fe24061e0d458a00bcb607ccbc851f2ed07ecbbc6026145adf8c861"
+        },
+        "payment_count": 1,
+        "mode": "rotate",
+        "raw_cookies": {
+          "lp_session_guest": "g-68fcd15370570",
+          "PHPSESSID": "k04k203c998mo0hldd5s2b0tki",
+          "wordpress_logged_in_7d41a6d42c153307d0c111379ebd73b8": "kq6emv3fai%7C1762608732%7CxDXKxu9sfRDLNcPkr8FC74Uet9gNoR8osiS44iULIaJ%7Cc50951d46453227cd86aa1b65f3828ef5d3bcee1dcbe159895193895ba8ec0da",
+          "wordpress_sec_7d41a6d42c153307d0c111379ebd73b8": "kq6emv3fai%7C1762608732%7CxDXKxu9sfRDLNcPkr8FC74Uet9gNoR8osiS44iULIaJ%7C88f10d1f3fe24061e0d458a00bcb607ccbc851f2ed07ecbbc6026145adf8c861"
+        },
+        "stripe_pk": "pk_live_51P1IHI03l8jXIw0z2s5Yjk4kOEDK1WinvzrfJkI6dBTXeqFxc5EJgUfOQr3y5tKxY8nK2xQGX6a5FBoNWdgj6QVH0085YH5WHt",
+        "stripe_nonce": "bb9a4921c3"
+      }
+    }
+  }
+}

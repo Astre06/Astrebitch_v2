@@ -1,0 +1,27 @@
+{
+  "8377573823": {
+    "sites": {
+      "https://www.seed2design.co.uk": {
+        "accounts": [
+          {
+            "email": "30pg707q2d@gmail.com",
+            "username": "user_w74x5mib",
+            "password": "pkrrr602gcag"
+          }
+        ],
+        "cookies": {},
+        "raw_cookies": {},
+        "cookies_valid": false,
+        "payment_count": 6,
+        "mode": "rotate",
+        "pk": null,
+        "pk_usage": 0,
+        "stripe_pk": "pk_live_DnbcM6ZBIkz7SrTH7W6jTzoI",
+        "stripe_nonce": "230fea5c5b"
+      }
+    },
+    "defaults_snapshot": [
+      "https://www.seed2design.co.uk"
+    ]
+  }
+}
