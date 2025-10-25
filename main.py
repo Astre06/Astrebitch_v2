@@ -1842,7 +1842,7 @@ def handle_site_buttons(call):
         bot.answer_callback_query(call.id, "Send your new site URL")
         instr_msg = bot.send_message(
             call.message.chat.id,
-            "Please send your new site URL now.\nSend as many as you can."
+            "Please send your new site URL now.\nMax:50"
         )
 
         # Save BOTH menu + prompt IDs
@@ -3234,3 +3234,4 @@ def main():
 # ================================================================
 if __name__ == "__main__":
     main()
+
