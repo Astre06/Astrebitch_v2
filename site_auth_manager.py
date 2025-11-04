@@ -141,6 +141,30 @@ def _save_state(state, chat_id: str):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cleaned, f, indent=2)
         os.replace(tmp, path)
+# --- Step 1: helper to remove a user's dead site safely ---
+def remove_user_site(chat_id: str, site_url: str) -> bool:
+    """
+    Remove a site from the user's JSON state if it exists.
+    Returns True if a site entry was removed, False otherwise.
+    Uses the same save lock as _save_state for thread safety.
+    """
+    try:
+        chat_id = str(chat_id)
+        state = _load_state(chat_id) or {}
+        user_entry = state.get(chat_id)
+        if not user_entry:
+            return False
+
+        sites = user_entry.get("sites", {})
+        if site_url in sites:
+            del sites[site_url]
+            _save_state(state, chat_id)
+            print(f"[REMOVE_SITE] Removed dead site for user {chat_id}: {site_url}")
+            return True
+    except Exception as e:
+        print(f"[REMOVE_SITE ERROR] {e}")
+    return False
+        
 def replace_user_sites(chat_id, new_sites):
     """
     Replace a user's site list with new ones.
@@ -904,8 +928,11 @@ class SiteAuthManager:
             return {
                 "status": "DECLINED",
                 "reason": f"Stripe: {stripe_reason or 'Unknown error'}",
-                "stripe": stripe_json
+                "stripe": stripe_json,
+                "site_dead": True,
+                "site_url": self.site_url,
             }
+
 
         # ================================================================
         # Continue to site checkout
@@ -927,16 +954,28 @@ class SiteAuthManager:
             timeout=10,
         )
 
+        # --- detect site not responding ---
         if not final_resp:
             print("[ERROR] Site did not respond.")
-            return {"status": "DECLINED", "reason": "Site Response Failed"}
+            return {
+                "status": "DECLINED",
+                "reason": "Site Response Failed",
+                "site_dead": True,
+                "site_url": self.site_url,
+            }
 
         try:
             site_json = final_resp.json()
             print(f"[DEBUG] Site response: {site_json}")
         except Exception as e:
             print(f"[ERROR] Site invalid JSON: {final_resp.text[:500]} ({e})")
-            site_json = {"success": False, "error": {"message": "Non-JSON response"}}
+            return {
+                "status": "DECLINED",
+                "reason": "Site invalid response",
+                "site_dead": True,
+                "site_url": self.site_url,
+            }
+
 
         # ✅ Process site result
         # ✅ Process site result
@@ -1284,7 +1323,6 @@ def reset_user_sites(chat_id):
 
     except Exception as e:
         print(f"[SITE RESET ERROR] Could not recreate site JSON for {chat_id}: {e}")
-
 
 
 
