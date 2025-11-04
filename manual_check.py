@@ -8,8 +8,8 @@ from bininfo import round_robin_bin_lookup
 from proxy_manager import get_user_proxy
 import pycountry
 from runtime_config import get_default_site
-from shared_state import user_busy
-from shared_state import save_live_cc_to_json
+from shared_state import user_busy, save_live_cc_to_json, try_process_with_retries
+
 
 # ✅ Per-user locks
 user_locks = {}
@@ -70,6 +70,21 @@ def country_to_flag(country_name: str) -> str:
 def process_manual_check(bot, message, allowed_users):
     start_time = time.perf_counter()
     chat_id = str(message.chat.id)
+    # --- Step 0: check if user still has active sites ---
+    try:
+        state = _load_state(chat_id)
+        user_sites = state.get(str(chat_id), {}).get("sites", {})
+    except Exception as e:
+        user_sites = {}
+        print(f"[WARN] Could not load sites for {chat_id}: {e}")
+
+    if not user_sites:
+        bot.send_message(
+            chat_id,
+            "⚠️ All your sites are dead or removed. Please add new ones before using /chk."
+        )
+        return
+        
     # 🚦 Prevent running if already busy
     if user_busy.get(chat_id):
         bot.send_message(chat_id, "⚠ You already have an active check running.")
@@ -216,7 +231,26 @@ def process_manual_check(bot, message, allowed_users):
                 return
 
                         
-            site_url, result = process_card_for_user_sites(card_data, chat_id, proxy=user_proxy)
+            from site_auth_manager import remove_user_site, _load_state
+
+            # --- Step 3: auto-remove dead sites & retry ---
+            site_url, result = try_process_with_retries(card_data, chat_id, user_proxy=user_proxy)
+            # 🧠 Recheck if user still has sites after retry
+            try:
+                state = _load_state(chat_id)
+                user_sites = state.get(str(chat_id), {}).get("sites", {})
+            except Exception:
+                user_sites = {}
+
+            if not user_sites:
+                bot.send_message(
+                    chat_id,
+                    "⚠️ All your sites have died during checking. Please add new ones before trying again."
+                )
+                user_busy[chat_id] = False
+                return
+
+
 
             # ✅ Ensure proxy flag is always present
             if isinstance(result, dict):
