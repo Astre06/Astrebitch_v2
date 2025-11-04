@@ -103,3 +103,53 @@ def save_live_cc_to_json(user_id: str, worker_id: int, live_data: dict):
         logging.info(f"[LIVE JSON] Worker {worker_id} → {file_path}")
     except Exception as e:
         logging.error(f"[LIVE JSON ERROR] User {user_id}, Worker {worker_id}: {e}")
+# ================================================================
+# 🔁 Shared Function — Retry logic for site checks (Manual + Mass)
+# ================================================================
+def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None, max_tries=None):
+    # lazy import to avoid circular dependency
+    from site_auth_manager import remove_user_site, _load_state, process_card_for_user_sites
+
+    # 1️⃣ Determine max retries based on how many sites the user has
+    if max_tries is None:
+        try:
+            state = _load_state(chat_id)
+            max_tries = len(state.get(str(chat_id), {}).get("sites", {}) or []) or 1
+        except Exception:
+            max_tries = 1
+
+    tries = 0
+    site_url, result = None, None
+
+    # 2️⃣ Loop through all available sites until one works
+    while tries < max_tries:
+        site_url, result = process_card_for_user_sites(
+            card_data,
+            chat_id,
+            proxy=user_proxy,
+            worker_id=worker_id,
+        )
+        tries += 1
+
+        # Normalize result
+        if not isinstance(result, dict):
+            result = {"status": "DECLINED", "reason": str(result or "Invalid result")}
+
+        reason = (result.get("reason") or "").lower()
+
+        # 3️⃣ Detect dead/unusable site
+        if result.get("site_dead") or "site response failed" in reason or (
+            reason.startswith("stripe:") and "request failed" in reason
+        ):
+            try:
+                removed = remove_user_site(chat_id, site_url)
+                if removed:
+                    print(f"[AUTO] Removed dead site for user {chat_id}: {site_url}")
+            except Exception as e:
+                print(f"[AUTO] Error removing site: {e}")
+            continue  # try next site
+
+        # ✅ Stop retrying on valid success/decline
+        break
+
+    return site_url, result
