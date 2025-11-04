@@ -383,10 +383,6 @@ def load_allowed_users():
         logging.warning(f"[LOAD WARN] {ALLOWED_FILE} not found — starting with empty list")
         return []
 
-def check_access(chat_id):
-    """Return True if user is allowed, False otherwise."""
-    return str(chat_id) in allowed_users
-
 # Load existing allowed users or create an empty list
 if os.path.exists(ALLOWED_FILE):
     try:
@@ -2673,15 +2669,6 @@ def handle_clean_buttons(call):
 def mass_command_handler(message):
     chat_id = str(message.chat.id)
 
-    # ✅ Restrict access
-    if chat_id not in allowed_users:
-        bot.reply_to(message, "🚫 You are not allowed to use /mass.")
-        return
-
-    # 🧩 Continue with your existing logic
-    # (e.g., check reply_to_message, download file, etc.)
-
-
     try:
         # 🧩 Prevent running if user is currently cleaning
         if chat_id in clean_waiting_users:
@@ -2703,10 +2690,10 @@ def mass_command_handler(message):
             if doc.file_name.endswith(".txt"):
                 clear_stop_event(chat_id)
 
-                # ✅ Start mass check silently in background
+                # Start mass check silently in background
                 threading.Thread(
                     target=handle_file,
-                    args=(bot, replied, allowed_users),  # ← added allowed_users here
+                    args=(bot, replied),
                     daemon=True
                 ).start()
                 logging.debug(f"[MASS] Started mass check thread for {chat_id}")
@@ -2714,7 +2701,6 @@ def mass_command_handler(message):
             else:
                 bot.reply_to(message, "❌ Replied file must be a .txt file.")
                 return
-
 
         # ----------------------------------------------------------
         # Case 2: replied to plain text (cards pasted directly)
