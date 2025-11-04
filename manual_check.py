@@ -234,23 +234,29 @@ def process_manual_check(bot, message, allowed_users):
             from site_auth_manager import remove_user_site, _load_state
 
             # --- Step 3: auto-remove dead sites & retry ---
+            # 🔁 Try all user sites with automatic removal of dead ones
             site_url, result = try_process_with_retries(card_data, chat_id, user_proxy=user_proxy)
 
-            # ✅ Only show "all sites dead" if there are truly no sites left in JSON
+            # 🧩 Re-check site list after retries to see if any remain
             try:
                 state = _load_state(chat_id)
                 user_sites = state.get(str(chat_id), {}).get("sites", {})
-            except Exception:
+            except Exception as e:
+                print(f"[WARN] Failed to reload sites for {chat_id}: {e}")
                 user_sites = {}
 
-            # only alert if absolutely no sites remain
+            # ⚠️ Only alert if all sites are completely gone
             if not user_sites:
-                bot.send_message(
-                    chat_id,
-                    "⚠️ All your sites are dead or removed. Please add new ones before using /chk."
-                )
-                user_busy[chat_id] = False
-                return
+                # Make sure the result also shows that everything failed
+                reason = (result.get("reason") or "").lower()
+                if "all sites failed" in reason or "removed" in reason:
+                    bot.send_message(
+                        chat_id,
+                        "⚠️ All your sites are dead. Please add new ones before using /chk."
+                    )
+                    user_busy[chat_id] = False
+                    return
+
 
 
 
