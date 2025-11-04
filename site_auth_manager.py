@@ -925,13 +925,20 @@ class SiteAuthManager:
 
         # 🧩 If Stripe failed, stop early (no site request)
         if not stripe_id:
+            # If Stripe fails due to API or connection issues → mark dead
+            is_network_issue = (
+                stripe_reason and any(x in stripe_reason.lower() for x in [
+                    "request failed", "connection", "timeout", "ssl", "proxy", "site"
+                ])
+            )
             return {
                 "status": "DECLINED",
                 "reason": f"Stripe: {stripe_reason or 'Unknown error'}",
                 "stripe": stripe_json,
-                "site_dead": True,
+                "site_dead": is_network_issue,
                 "site_url": self.site_url,
             }
+
 
 
         # ================================================================
@@ -956,13 +963,15 @@ class SiteAuthManager:
 
         # --- detect site not responding ---
         if not final_resp:
-            print("[ERROR] Site did not respond.")
+            print("[ERROR] Site did not respond or timed out.")
+            # Only mark as dead if the issue looks like a true site failure
             return {
                 "status": "DECLINED",
-                "reason": "Site Response Failed",
-                "site_dead": True,
+                "reason": "Site Response Failed (Timeout or No Response)",
+                "site_dead": True,   # true dead site (no HTTP response at all)
                 "site_url": self.site_url,
             }
+
 
         try:
             site_json = final_resp.json()
@@ -1032,8 +1041,15 @@ class SiteAuthManager:
 
 
         if not final_resp:
-            print("[ERROR] Site did not respond.")
-            return {"status": "DECLINED", "reason": "Site Response Failed"}
+            print("[ERROR] Site did not respond or timed out.")
+            # mark this as a true dead site, because site didn't respond at all
+            return {
+                "status": "DECLINED",
+                "reason": "Site Response Failed (Timeout or No Response)",
+                "site_dead": True,
+                "site_url": self.site_url
+            }
+
 
         try:
             site_json = final_resp.json()
