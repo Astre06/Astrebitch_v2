@@ -235,20 +235,26 @@ def process_manual_check(bot, message, allowed_users):
 
             # --- Step 3: auto-remove dead sites & retry ---
             site_url, result = try_process_with_retries(card_data, chat_id, user_proxy=user_proxy)
-            # 🧠 Recheck if user still has sites after retry
-            try:
-                state = _load_state(chat_id)
-                user_sites = state.get(str(chat_id), {}).get("sites", {})
-            except Exception:
-                user_sites = {}
 
-            if not user_sites:
-                bot.send_message(
-                    chat_id,
-                    "⚠️ All your sites have died during checking. Please add new ones before trying again."
-                )
-                user_busy[chat_id] = False
-                return
+            # ✅ Only declare all sites dead if the result failed AND none remain
+            if not result or (
+                result.get("status") == "DECLINED"
+                and "site response failed" in (result.get("reason") or "").lower()
+            ):
+                try:
+                    state = _load_state(chat_id)
+                    user_sites = state.get(str(chat_id), {}).get("sites", {})
+                except Exception:
+                    user_sites = {}
+
+                if not user_sites:
+                    bot.send_message(
+                        chat_id,
+                        "⚠️ All your sites are dead or removed. Please add new ones before using /chk."
+                    )
+                    user_busy[chat_id] = False
+                    return
+
 
 
 
