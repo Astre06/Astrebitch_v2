@@ -8,8 +8,8 @@ from bininfo import round_robin_bin_lookup
 from proxy_manager import get_user_proxy
 import pycountry
 from runtime_config import get_default_site
-from shared_state import user_busy, save_live_cc_to_json, try_process_with_retries
-
+from shared_state import user_busy
+from shared_state import save_live_cc_to_json
 
 # ✅ Per-user locks
 user_locks = {}
@@ -70,21 +70,6 @@ def country_to_flag(country_name: str) -> str:
 def process_manual_check(bot, message, allowed_users):
     start_time = time.perf_counter()
     chat_id = str(message.chat.id)
-    # --- Step 0: check if user still has active sites ---
-    try:
-        state = _load_state(chat_id)
-        user_sites = state.get(str(chat_id), {}).get("sites", {})
-    except Exception as e:
-        user_sites = {}
-        print(f"[WARN] Could not load sites for {chat_id}: {e}")
-
-    if not user_sites:
-        bot.send_message(
-            chat_id,
-            "⚠️ All your sites are dead or removed. Please add new ones before using /chk."
-        )
-        return
-        
     # 🚦 Prevent running if already busy
     if user_busy.get(chat_id):
         bot.send_message(chat_id, "⚠ You already have an active check running.")
@@ -231,45 +216,7 @@ def process_manual_check(bot, message, allowed_users):
                 return
 
                         
-            from site_auth_manager import remove_user_site, _load_state
-
-            # --- Step 3: auto-remove dead sites & retry ---
-            # 🔁 Try all user sites with automatic removal of dead ones
-            # --- Step 3: auto-remove dead sites & retry ---
-            # 🔁 Try all user sites with automatic removal of dead ones
-            site_url, result = try_process_with_retries(card_data, chat_id, user_proxy=user_proxy)
-
-            # ✅ Handle no result or repeated dead sites
-            if not result or not isinstance(result, dict):
-                bot.send_message(
-                    chat_id,
-                    "⚠️ All your sites are dead or failed to respond. Please add new ones before using /chk."
-                )
-                user_busy[chat_id] = False
-                return
-
-            # 🧩 Reload user sites from JSON after retry loop
-            try:
-                state = _load_state(chat_id)
-                user_sites = state.get(str(chat_id), {}).get("sites", {})
-            except Exception as e:
-                print(f"[WARN] Failed to reload sites for {chat_id}: {e}")
-                user_sites = {}
-
-            # 🚨 If there are zero sites left and no successful result — all sites dead
-            if (not user_sites) and result.get("site_dead"):
-                bot.send_message(
-                    chat_id,
-                    "⚠️ All your sites are dead or removed. Please add new ones before using /chk."
-                )
-                user_busy[chat_id] = False
-                return
-
-            # ✅ If we reach here, at least one site succeeded or returned a normal decline
-
-
-
-
+            site_url, result = process_card_for_user_sites(card_data, chat_id, proxy=user_proxy)
 
             # ✅ Ensure proxy flag is always present
             if isinstance(result, dict):
