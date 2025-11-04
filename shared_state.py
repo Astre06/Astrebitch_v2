@@ -107,22 +107,28 @@ def save_live_cc_to_json(user_id: str, worker_id: int, live_data: dict):
 # 🔁 Shared Function — Retry logic for site checks (Manual + Mass)
 # ================================================================
 def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None, max_tries=None):
-    # lazy import to avoid circular dependency
     from site_auth_manager import remove_user_site, _load_state, process_card_for_user_sites
-
-    # 1️⃣ Determine max retries based on how many sites the user has
-    if max_tries is None:
-        try:
-            state = _load_state(chat_id)
-            max_tries = len(state.get(str(chat_id), {}).get("sites", {}) or []) or 1
-        except Exception:
-            max_tries = 1
 
     tries = 0
     site_url, result = None, None
 
-    # 2️⃣ Loop through all available sites until one works
-    while tries < max_tries:
+    while True:
+        # 🧩 Reload state each time to get the latest remaining sites
+        try:
+            state = _load_state(chat_id)
+            user_sites = list(state.get(str(chat_id), {}).get("sites", {}).keys())
+        except Exception:
+            user_sites = []
+
+        if not user_sites:
+            # no sites left → stop immediately
+            return None, {"status": "DECLINED", "reason": "All sites failed or removed"}
+
+        max_tries = max_tries or len(user_sites)
+        if tries >= max_tries:
+            break
+
+        # 🧠 Process using next available site
         site_url, result = process_card_for_user_sites(
             card_data,
             chat_id,
@@ -137,7 +143,7 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
 
         reason = (result.get("reason") or "").lower()
 
-        # 3️⃣ Detect dead/unusable site
+        # 🧨 Detect and remove dead/unusable sites
         if result.get("site_dead") or "site response failed" in reason or (
             reason.startswith("stripe:") and "request failed" in reason
         ):
@@ -147,9 +153,11 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
                     print(f"[AUTO] Removed dead site for user {chat_id}: {site_url}")
             except Exception as e:
                 print(f"[AUTO] Error removing site: {e}")
-            continue  # try next site
+            continue  # move on to next site
 
-        # ✅ Stop retrying on valid success/decline
+        # ✅ Valid result or non-fatal decline — stop here
         break
 
+    # Return the final site and its result (after retries)
     return site_url, result
+
