@@ -15,7 +15,6 @@ from shared_state import user_busy
 from site_auth_manager import clone_user_site_files
 from config import MAX_WORKERS
 from shared_state import save_live_cc_to_json
-
 # ================================================================
 # ⚙️ CONFIG IMPORTS  (Matches your real config.py)
 # ================================================================
@@ -406,9 +405,17 @@ def run_mass_check_thread(bot, message, allowed_users=None):
 # ================================================================
 # 📂 MAIN MASS CHECK HANDLER
 # ================================================================
-def handle_file(bot, message, allowed_users=None):
+def handle_file(bot, message, allowed_users):
     chat_id = str(message.chat.id)
+
+    # ✅ Check access before continuing
+    if allowed_users is not None and chat_id not in allowed_users:
+        bot.reply_to(message, "🚫 You are not allowed to use this bot.")
+        return
+
+    # ✅ Initialize stop event for this user
     stop_event = get_stop_event(chat_id)
+
 
     # 🚦 Prevent overlap with manual check or another mass check
     if user_busy.get(chat_id):
