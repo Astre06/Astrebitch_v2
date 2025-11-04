@@ -408,10 +408,29 @@ def run_mass_check_thread(bot, message, allowed_users=None):
 def handle_file(bot, message, allowed_users):
     chat_id = str(message.chat.id)
 
+    # --- Step 0: check if user still has active sites ---
+    from site_auth_manager import _load_state
+
+    try:
+        state = _load_state(chat_id)
+        user_sites = state.get(str(chat_id), {}).get("sites", {})
+    except Exception as e:
+        user_sites = {}
+        print(f"[WARN] Could not load sites for {chat_id}: {e}")
+
+    if not user_sites:
+        bot.send_message(
+            chat_id,
+            "⚠️ All your sites are dead or removed. Please add new ones before running mass check again."
+        )
+        print(f"[ABORT] No active sites found for {chat_id}. Skipping mass check.")
+        return
+
     # ✅ Check access before continuing
     if allowed_users is not None and chat_id not in allowed_users:
         bot.reply_to(message, "🚫 You are not allowed to use this bot.")
         return
+
 
     # ✅ Initialize stop event for this user
     stop_event = get_stop_event(chat_id)
@@ -546,13 +565,41 @@ def handle_file(bot, message, allowed_users):
 
                 try:
                     user_proxy = get_user_proxy(chat_id)
-                    result_site, result = process_card_for_user_sites(
+
+                    # --- unified retry + cleanup (shared helper) ---
+                    from shared_state import try_process_with_retries
+                    from site_auth_manager import _load_state
+
+                    # --- unified retry + cleanup (shared helper) ---
+                    result_site, result = try_process_with_retries(
                         card,
                         chat_id,
-                        proxy=user_proxy,
-                        worker_id=worker_id  # 👈 pass worker_id to the manager
+                        user_proxy=user_proxy,
+                        worker_id=worker_id
                     )
-                    # 🔄 Normalize message using the same logic as manual check
+
+                    # 🧠 After retries: recheck if user has any live sites left
+                    try:
+                        state = _load_state(chat_id)
+                        user_sites = state.get(str(chat_id), {}).get("sites", {})
+                    except Exception as e:
+                        user_sites = {}
+                        print(f"[WARN] Could not recheck user sites for {chat_id}: {e}")
+
+                    if not user_sites:
+                        safe_send_message(
+                            bot,
+                            chat_id,
+                            "⚠️ All your sites have died during checking. Please add new ones.",
+                            parse_mode="HTML"
+                        )
+                        print(f"[AUTO-STOP] All sites dead for {chat_id}. Stopping checks.")
+                        set_stop_event(chat_id)  # optional: if you use stop events to halt threads
+                        return  # stop this worker early
+
+
+                    # 🔄 Normalize message using the same logic as manual check (keep your original handling below)
+
                     from site_auth_manager import normalize_result
                     if isinstance(result, dict):
                         normalized = normalize_result(result.get("status"), result.get("reason", ""))
