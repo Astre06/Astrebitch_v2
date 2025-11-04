@@ -112,23 +112,20 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
     tries = 0
     site_url, result = None, None
 
-    while True:
-        # 🧩 Reload state each time to get the latest remaining sites
-        try:
-            state = _load_state(chat_id)
-            user_sites = list(state.get(str(chat_id), {}).get("sites", {}).keys())
-        except Exception:
-            user_sites = []
+    # 🧩 Load once at start, cache sites in memory
+    try:
+        state = _load_state(chat_id)
+        user_sites = list(state.get(str(chat_id), {}).get("sites", {}).keys())
+    except Exception:
+        user_sites = []
 
-        if not user_sites:
-            # no sites left → stop immediately
-            return None, {"status": "DECLINED", "reason": "All sites failed or removed"}
+    if not user_sites:
+        return None, {"status": "DECLINED", "reason": "No sites configured"}
 
-        max_tries = max_tries or len(user_sites)
-        if tries >= max_tries:
-            break
+    max_tries = max_tries or len(user_sites)
+    dead_sites = []  # temporarily track dead ones
 
-        # 🧠 Process using next available site
+    while tries < max_tries and user_sites:
         site_url, result = process_card_for_user_sites(
             card_data,
             chat_id,
@@ -143,21 +140,29 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
 
         reason = (result.get("reason") or "").lower()
 
-        # 🧨 Detect and remove dead/unusable sites
+        # 🧨 Mark dead site but don't remove from disk yet
         if result.get("site_dead") or "site response failed" in reason or (
             reason.startswith("stripe:") and "request failed" in reason
         ):
-            try:
-                removed = remove_user_site(chat_id, site_url)
-                if removed:
-                    print(f"[AUTO] Removed dead site for user {chat_id}: {site_url}")
-            except Exception as e:
-                print(f"[AUTO] Error removing site: {e}")
-            continue  # move on to next site
+            dead_sites.append(site_url)
+            print(f"[AUTO] Marking site as dead (retry next): {site_url}")
+            user_sites.remove(site_url)
+            continue
 
-        # ✅ Valid result or non-fatal decline — stop here
+        # ✅ Found a valid site or result
         break
 
-    # Return the final site and its result (after retries)
+    # 🧹 After loop ends → now update the JSON for dead sites
+    for s in dead_sites:
+        try:
+            removed = remove_user_site(chat_id, s)
+            if removed:
+                print(f"[AUTO] Permanently removed dead site after retries: {s}")
+        except Exception as e:
+            print(f"[AUTO] Error removing site {s}: {e}")
+
+    if not user_sites:
+        return None, {"status": "DECLINED", "reason": "All sites failed or removed"}
+
     return site_url, result
 
