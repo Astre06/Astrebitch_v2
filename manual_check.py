@@ -235,9 +235,20 @@ def process_manual_check(bot, message, allowed_users):
 
             # --- Step 3: auto-remove dead sites & retry ---
             # 🔁 Try all user sites with automatic removal of dead ones
+            # --- Step 3: auto-remove dead sites & retry ---
+            # 🔁 Try all user sites with automatic removal of dead ones
             site_url, result = try_process_with_retries(card_data, chat_id, user_proxy=user_proxy)
 
-            # 🧩 Re-check site list after retries to see if any remain
+            # ✅ Handle no result or repeated dead sites
+            if not result or not isinstance(result, dict):
+                bot.send_message(
+                    chat_id,
+                    "⚠️ All your sites are dead or failed to respond. Please add new ones before using /chk."
+                )
+                user_busy[chat_id] = False
+                return
+
+            # 🧩 Reload user sites from JSON after retry loop
             try:
                 state = _load_state(chat_id)
                 user_sites = state.get(str(chat_id), {}).get("sites", {})
@@ -245,17 +256,16 @@ def process_manual_check(bot, message, allowed_users):
                 print(f"[WARN] Failed to reload sites for {chat_id}: {e}")
                 user_sites = {}
 
-            # ⚠️ Only alert if all sites are completely gone
-            if not user_sites:
-                # Make sure the result also shows that everything failed
-                reason = (result.get("reason") or "").lower()
-                if "all sites failed" in reason or "removed" in reason:
-                    bot.send_message(
-                        chat_id,
-                        "⚠️ All your sites are dead. Please add new ones before using /chk."
-                    )
-                    user_busy[chat_id] = False
-                    return
+            # 🚨 If there are zero sites left and no successful result — all sites dead
+            if (not user_sites) and result.get("site_dead"):
+                bot.send_message(
+                    chat_id,
+                    "⚠️ All your sites are dead or removed. Please add new ones before using /chk."
+                )
+                user_busy[chat_id] = False
+                return
+
+            # ✅ If we reach here, at least one site succeeded or returned a normal decline
 
 
 
