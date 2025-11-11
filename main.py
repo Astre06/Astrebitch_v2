@@ -3236,11 +3236,22 @@ def fallback(message):
 
 def main():
     logging.info("Astree Bot Running…")
-    try:
-        bot.infinity_polling(timeout=60, long_polling_timeout=10)
-    except Exception as e:
-        logging.critical(f"Bot crashed: {e}")
-        raise
+    backoff = 5
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=10)
+        except KeyboardInterrupt:
+            logging.info("Shutdown requested by operator.")
+            break
+        except Exception as e:
+            logging.critical("Bot polling crashed: %s", e, exc_info=True)
+            wait = backoff
+            logging.info("Restarting polling in %s seconds…", wait)
+            time.sleep(wait)
+            backoff = min(backoff * 2, 300)
+            continue
+        else:
+            break
 
 
 # ================================================================

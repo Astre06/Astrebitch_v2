@@ -23,12 +23,12 @@ import threading
 import requests
 from config import DEFAULT_API_URL
 from urllib.parse import urlparse
-from fake_useragent import UserAgent
 from requests.utils import dict_from_cookiejar, cookiejar_from_dict
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ProxyError, ConnectTimeout, ConnectionError, ReadTimeout, SSLError
 from config import PAYMENT_LIMIT, RETRY_COUNT, RETRY_DELAY
 from runtime_config import get_all_default_sites, get_default_site
+from user_agents import get_random_user_agent
 
 from proxy_manager import get_user_proxy
 
@@ -521,7 +521,7 @@ class SiteAuthManager:
         if session is None or not isinstance(session, requests.Session):
             session = self._new_session()
 
-        headers = {"User-Agent": UserAgent().random, "Referer": self.register_url}
+        headers = {"User-Agent": get_random_user_agent(), "Referer": self.register_url}
         try:
             page = safe_request(session, "get", self.register_url, headers=headers, timeout=10)
             if not hasattr(page, "text") or not page.text:
@@ -568,7 +568,7 @@ class SiteAuthManager:
         if session is None or not isinstance(session, requests.Session):
             session = self._new_session()
 
-        headers = {"User-Agent": UserAgent().random, "Referer": self.register_url}
+        headers = {"User-Agent": get_random_user_agent(), "Referer": self.register_url}
         email = generate_random_email()
         username = generate_random_username()
         password = generate_random_string(12)
@@ -829,7 +829,7 @@ class SiteAuthManager:
             }
 
         # Stripe: fetch PK + nonce
-        headers = {"User-Agent": UserAgent().random, "Referer": self.payment_url}
+        headers = {"User-Agent": get_random_user_agent(), "Referer": self.payment_url}
         pk, nonce = self._fetch_pk_and_nonce(session, headers)
         print(f"[DEBUG] Stripe PK: {pk}, Nonce: {nonce}")
 
