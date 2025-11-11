@@ -42,7 +42,12 @@ ADMIN_ID = cfg["ADMIN_ID"]
 MAX_WORKERS = cfg["MAX_WORKERS"]
 BATCH_SIZE = cfg["BATCH_SIZE"]
 DELAY_BETWEEN_BATCHES = cfg["DELAY_BETWEEN_BATCHES"]
-from shared_state import save_live_cc_to_json
+from shared_state import (
+    save_live_cc_to_json,
+    is_user_busy as shared_is_user_busy,
+    busy_snapshot,
+    clear_user_busy,
+)
 from proxy_manager import (
     add_user_proxy,
     replace_user_proxies,
@@ -60,10 +65,16 @@ from mass_check import (
     clear_stop_event,
     is_stop_requested,
     stop_events,
+    set_dispatcher as set_mass_dispatcher,
 )
 
 
-from manual_check import register_manual_check
+from manual_check import (
+    register_manual_check,
+    user_locks,
+    user_locks_lock,
+    set_dispatcher as set_manual_dispatcher,
+)
 from proxy_manager import parse_proxy_line
 from proxy_check import register_checkproxy
 from site_auth_manager import (
@@ -72,14 +83,15 @@ from site_auth_manager import (
     _save_state,
     process_card_for_user_sites,
 )
+from dispatcher import MessageDispatcher
 
 # Global dictionary to hold temporary site input for each user
 user_sites = {}
+BUSY_TIMEOUT_SECONDS = 600
+
 # ================================================================
 # 🚦 USER BUSY TRACKER
 # ================================================================
-from shared_state import user_busy
-
 def safe_load_state(chat_id):
     try:
         return _load_state(chat_id)
@@ -180,13 +192,19 @@ bot.send_document = _safe_wrapper("send_document", _original_send_document)
 bot.send_photo = _safe_wrapper("send_photo", _original_send_photo)
 bot.send_video = _safe_wrapper("send_video", _original_send_video)
 
+# Centralized dispatcher for Telegram calls
+dispatcher = MessageDispatcher(bot, rate_per_second=20, max_retries=5)
+set_message_dispatcher(dispatcher)
+set_manual_dispatcher(dispatcher)
+set_mass_dispatcher(dispatcher)
+start_busy_watchdog(bot)
+
 # Register mass check system (STOP + Resume callbacks)
 from mass_check import activechecks
-from manual_check import user_locks, user_locks_lock
 clean_waiting_users = set()
 def is_user_busy(chat_id: str):
     """Return True if user currently has an active mass or manual check."""
-    if user_busy.get(chat_id):  # 🔹 ADD THIS LINE
+    if shared_is_user_busy(chat_id):
         return True
 
     # Mass check running?
@@ -204,12 +222,24 @@ def is_user_busy(chat_id: str):
 # ============================================================
 # 🧩 Safe Telegram Sender (Flood Control & Retry-Aware)
 # ============================================================
+message_dispatcher = None
+
+
+def set_message_dispatcher(dispatcher: MessageDispatcher):
+    global message_dispatcher
+    message_dispatcher = dispatcher
+
+
 def safe_send(bot, method, *args, **kwargs):
     """
     Thread-safe Telegram sender with rate-limit protection and retry-after support.
     Usage:
         safe_send(bot, "send_message", chat_id, text, parse_mode="HTML")
     """
+
+    if message_dispatcher:
+        message_dispatcher.enqueue(method, *args, **kwargs)
+        return
 
     def run():
         max_attempts = 3  # Prevent infinite loops
@@ -223,7 +253,6 @@ def safe_send(bot, method, *args, **kwargs):
             except telebot.apihelper.ApiTelegramException as e:
                 err_text = str(e)
                 if "Too Many Requests" in err_text:
-                    # Extract retry time safely
                     import re
                     match = re.search(r"retry after (\d+)", err_text)
                     wait = int(match.group(1)) if match else 5
@@ -241,6 +270,48 @@ def safe_send(bot, method, *args, **kwargs):
         logging.error(f"[safe_send] Failed after {max_attempts} attempts for {method}")
 
     threading.Thread(target=run, daemon=True).start()
+
+
+def start_busy_watchdog(bot, timeout: int = BUSY_TIMEOUT_SECONDS, interval: int = 60):
+    """Background watchdog that clears stale busy flags and notifies users."""
+
+    def monitor():
+        while True:
+            time.sleep(interval)
+            snapshot = busy_snapshot()
+            now = time.time()
+            for chat_id, info in snapshot.items():
+                started = info.get("started")
+                if not started:
+                    continue
+                if now - started < timeout:
+                    continue
+
+                label = info.get("label", "unknown")
+                logging.warning(f"[BUSY WATCHDOG] Clearing stale '{label}' session for user {chat_id}")
+                if label == "mass":
+                    try:
+                        set_stop_event(chat_id)
+                    except Exception:
+                        logging.exception(f"[BUSY WATCHDOG] Failed to stop mass check for {chat_id}")
+                    safe_send(
+                        bot,
+                        "send_message",
+                        chat_id,
+                        "⚠️ Your mass check took too long and was reset. Please start again.",
+                        parse_mode="HTML",
+                    )
+                else:
+                    safe_send(
+                        bot,
+                        "send_message",
+                        chat_id,
+                        "⚠️ Your previous check timed out and has been reset. Please try again.",
+                        parse_mode="HTML",
+                    )
+                clear_user_busy(chat_id)
+
+    threading.Thread(target=monitor, daemon=True).start()
 
 
 from cardgen import (
@@ -3252,6 +3323,11 @@ def main():
             continue
         else:
             break
+    if message_dispatcher:
+        try:
+            message_dispatcher.shutdown(timeout=5)
+        except Exception:
+            logging.exception("Failed to shut down dispatcher cleanly")
 
 
 # ================================================================

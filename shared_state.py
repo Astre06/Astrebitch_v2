@@ -2,12 +2,17 @@
 # 🧩 Shared State Module
 # ================================================================
 
-user_busy = {}
-
-# ================================================================
-# 🔧 Proxy Format Parser (shared by proxy_manager & proxy_check)
-# ================================================================
 import re
+import os
+import json
+import threading
+import logging
+import time
+from datetime import datetime
+
+user_busy = {}
+_busy_records = {}
+_busy_lock = threading.Lock()
 
 def parse_proxy_line(line: str):
     """Parses proxies in common formats and returns a dict or None if invalid."""
@@ -52,13 +57,32 @@ def parse_proxy_line(line: str):
 # 🧾 Shared Function — Save Live CC JSON (per user & worker)
 # ============================================================
 
-import os
-import json
-import threading
-import logging
-from datetime import datetime
-
 _livecc_folder_lock = threading.Lock()
+
+
+def set_user_busy(chat_id: str, label: str):
+    with _busy_lock:
+        user_busy[str(chat_id)] = label or True
+        _busy_records[str(chat_id)] = {"label": label, "started": time.time()}
+
+
+def clear_user_busy(chat_id: str):
+    with _busy_lock:
+        user_busy.pop(str(chat_id), None)
+        _busy_records.pop(str(chat_id), None)
+
+
+def is_user_busy(chat_id: str) -> bool:
+    with _busy_lock:
+        return str(chat_id) in user_busy
+
+
+def busy_snapshot():
+    with _busy_lock:
+        return {
+            chat_id: record.copy()
+            for chat_id, record in _busy_records.items()
+        }
 
 def save_live_cc_to_json(user_id: str, worker_id: int, live_data: dict):
     """
