@@ -86,6 +86,25 @@ def _get_user_site_file(chat_id):
 _save_lock = threading.Lock()
 
 
+def _normalize_site_key(site_url: str) -> str:
+    """
+    Normalize site URL to scheme://netloc without trailing slash.
+    Ensures consistent comparisons when adding/removing sites.
+    """
+    try:
+        site_url = (site_url or "").strip()
+        if not site_url:
+            return ""
+        if not site_url.startswith(("http://", "https://")):
+            site_url = f"https://{site_url}"
+        parsed = urlparse(site_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    except Exception:
+        pass
+    return site_url.rstrip("/")
+
+
 # ==========================================================
 # STATE HELPERS
 # ==========================================================
@@ -156,6 +175,9 @@ def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) 
     """
     try:
         chat_id = str(chat_id)
+        target = _normalize_site_key(site_url)
+        if not target:
+            return False
         state = _load_state(chat_id) or {}
         user_entry = state.get(chat_id)
         if not user_entry:
@@ -163,11 +185,23 @@ def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) 
 
         sites = user_entry.get("sites", {})
         removed = False
-        if site_url in sites:
-            del sites[site_url]
+        keys_to_remove = [
+            existing_key
+            for existing_key in list(sites.keys())
+            if _normalize_site_key(existing_key) == target
+        ]
+
+        if keys_to_remove:
+            for key in keys_to_remove:
+                del sites[key]
+            snapshot = user_entry.get("defaults_snapshot")
+            if isinstance(snapshot, list):
+                user_entry["defaults_snapshot"] = [
+                    snap for snap in snapshot if _normalize_site_key(snap) != target
+                ]
             _save_state(state, chat_id)
             removed = True
-            print(f"[REMOVE_SITE] Removed dead site for user {chat_id}: {site_url}")
+            print(f"[REMOVE_SITE] Removed dead site for user {chat_id}: {target}")
 
         # Also remove from worker-specific site files so the dead site cannot be reused.
         user_dir = os.path.join("sites", chat_id)
@@ -178,8 +212,19 @@ def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) 
                     with open(path, "r", encoding="utf-8") as f:
                         worker_state = json.load(f)
                     worker_entry = worker_state.get(chat_id, {}).get("sites", {})
-                    if site_url in worker_entry:
-                        del worker_state[chat_id]["sites"][site_url]
+                    worker_keys_to_remove = [
+                        existing_key
+                        for existing_key in list(worker_entry.keys())
+                        if _normalize_site_key(existing_key) == target
+                    ]
+                    if worker_keys_to_remove:
+                        for key in worker_keys_to_remove:
+                            del worker_state[chat_id]["sites"][key]
+                        snapshot = worker_state.get(chat_id, {}).get("defaults_snapshot")
+                        if isinstance(snapshot, list):
+                            worker_state[chat_id]["defaults_snapshot"] = [
+                                snap for snap in snapshot if _normalize_site_key(snap) != target
+                            ]
                         with open(path, "w", encoding="utf-8") as f:
                             json.dump(worker_state, f, indent=2)
                         print(f"[REMOVE_SITE] Removed dead site from {os.path.basename(path)} for user {chat_id}")
@@ -1223,21 +1268,31 @@ def normalize_result(status_raw: str, err_msg: str = ""):
 # ==========================================================
 # PROCESS CARD FOR USER SITES (Auto-default site if missing)
 # ==========================================================
-def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, preferred_site=None):
+def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, preferred_site=None, stop_checker=None):
     from mass_check import is_stop_requested
 
     # 🛑 Stop check before anything starts
-    if is_stop_requested(str(chat_id)):
+    chat_id = str(chat_id)
+
+    def _should_stop() -> bool:
+        if stop_checker:
+            try:
+                if stop_checker():
+                    return True
+            except Exception:
+                pass
+        return is_stop_requested(chat_id)
+
+    if _should_stop():
         print(f"[PROCESS STOP] User {chat_id} requested stop before processing card.")
         return None, {"status": "STOPPED", "reason": "User requested stop"}
 
     state = _load_state(chat_id)
-    chat_id = str(chat_id)
     user_sites = list(state.get(chat_id, {}).get("sites", {}).keys())
 
     # ✅ AUTO-ADD default site for new users (no sites.json entry)
     if not user_sites:
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before auto-site setup.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1269,7 +1324,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # =======================================================
     if preferred_site:
         target_site = preferred_site
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before forced site processing.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1285,7 +1340,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # MODE: ROTATE  (random + round robin)
     # =======================================================
     if mode == "rotate":
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before rotate mode processing.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1308,20 +1363,20 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # MODE: ALL
     # =======================================================
     elif mode == "all":
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before all-sites loop.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
         result = None
         for site_url in user_sites:
-            if is_stop_requested(str(chat_id)):
+            if _should_stop():
                 print(f"[PROCESS STOP] User {chat_id} stopped mid-loop (site={site_url}).")
                 return None, {"status": "STOPPED", "reason": "User requested stop"}
 
             manager = SiteAuthManager(site_url, chat_id, proxy, worker_id=worker_id)
             result = manager.process_card(ccx)
 
-            if is_stop_requested(str(chat_id)):
+            if _should_stop():
                 print(f"[PROCESS STOP] User {chat_id} stopped after processing site {site_url}.")
                 return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1340,7 +1395,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # Fallback
     # =======================================================
     else:
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before fallback mode.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1349,7 +1404,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
         manager = SiteAuthManager(site_url, chat_id, proxy, worker_id=worker_id)
         result = manager.process_card(ccx)
 
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before returning fallback result.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
