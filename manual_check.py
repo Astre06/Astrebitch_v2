@@ -322,7 +322,7 @@ def process_manual_check(bot, message, allowed_users):
             "insufficient", "not enough funds", "low balance",
             "declined insufficient", "insufficient_funds"
         ]):
-            final_message_detail = "Insufficient funds."
+            final_message_detail = "Your card has insufficient funds."
             final_status = "INSUFFICIENT_FUNDS"
 
         elif any(word in raw_reason for word in [
@@ -390,7 +390,7 @@ def process_manual_check(bot, message, allowed_users):
             if any(word in str(final_status).upper() for word in ["LIVE", "APPROVED", "CARD", "CCN", "CVV", "INSUFFICIENT", "3DS"]):
                 live_entry_full = {
                     "cc": raw_card_for_bin,
-                    "status": result.get("top_status", final_status),
+                    "status": top_status,
                     "site": site_url,
                     "scheme": scheme,
                     "type": card_type,
@@ -398,7 +398,7 @@ def process_manual_check(bot, message, allowed_users):
                     "bank": bank,
                     "country": country,
                     "proxy": result.get("_used_proxy", False),
-                    "message": result.get("reason", final_message_detail),
+                    "message": final_message_detail,
                 }
                 save_live_cc_to_json(chat_id, 1, live_entry_full)
 
@@ -439,15 +439,20 @@ def process_manual_check(bot, message, allowed_users):
             top_status = "CVV ⚠️"
             emoji = "⚠️"
         elif final_status in ["INSUFFICIENT_FUNDS"]:
-            top_status = "Insufficient Funds 💵"
-            emoji = "💵"
+            top_status = "LOW FUNDS"
+            emoji = "⚠️"
         elif final_status in ["3DS_REQUIRED"]:
-            top_status = "3DS ⚠️"
+            top_status = "3DS"
             emoji = "⚠️"
         else:
             top_status = "Declined ❌"
             emoji = "❌"
 
+        status_text = f"{final_status}{emoji}"
+        if final_status == "3DS_REQUIRED":
+            status_text = "⚠️ Requires Action"
+        elif final_status == "INSUFFICIENT_FUNDS":
+            status_text = "⚠️ Insufficient Funds"
 
         safe_raw_card = escape(raw_card_for_bin)
         final_msg = (
@@ -455,7 +460,7 @@ def process_manual_check(bot, message, allowed_users):
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<code>✧ <b>Card:</b></code> <code>{safe_raw_card}</code>\n"
             f"<code>✧ <b>Gateway:</b> Stripe Auth</code>\n"
-            f"<code>✧ <b>Status:</b> {final_status}{emoji}</code>\n"
+            f"<code>✧ <b>Status:</b> {status_text}</code>\n"
             f"<code>✧ <b>Message:</b> {final_message_detail}</code>\n"
             f"<code>✧ <b>Type:</b> {scheme} | {card_type} | {brand}</code>\n"
             f"<code>✧ <b>Bank:</b> {escape(bank)}</code>\n"
