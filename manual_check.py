@@ -442,12 +442,15 @@ def process_manual_check(bot, message, allowed_users):
             top_status = "Insufficient Funds 💵"
             emoji = "💵"
         elif final_status in ["3DS_REQUIRED"]:
-            top_status = "3DS ⚠️"
+            top_status = "3DS"
             emoji = "⚠️"
         else:
             top_status = "Declined ❌"
             emoji = "❌"
 
+        status_text = f"{final_status}{emoji}"
+        if final_status == "3DS_REQUIRED":
+            status_text = "⚠️ Requires Action"
 
         safe_raw_card = escape(raw_card_for_bin)
         final_msg = (
@@ -455,7 +458,7 @@ def process_manual_check(bot, message, allowed_users):
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<code>✧ <b>Card:</b></code> <code>{safe_raw_card}</code>\n"
             f"<code>✧ <b>Gateway:</b> Stripe Auth</code>\n"
-            f"<code>✧ <b>Status:</b> {final_status}{emoji}</code>\n"
+            f"<code>✧ <b>Status:</b> {status_text}</code>\n"
             f"<code>✧ <b>Message:</b> {final_message_detail}</code>\n"
             f"<code>✧ <b>Type:</b> {scheme} | {card_type} | {brand}</code>\n"
             f"<code>✧ <b>Bank:</b> {escape(bank)}</code>\n"

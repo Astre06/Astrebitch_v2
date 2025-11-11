@@ -737,7 +737,7 @@ def handle_file(bot, message, allowed_users):
                             top_status, count_as, send_message = "CVV ⚠️", "cvv", True
 
                         elif any(x in msg_lower for x in ["requires_action", "3ds", "authentication required"]):
-                            top_status, count_as, send_message = "3DS ⚠️", "threed", True
+                            top_status, count_as, send_message = "3DS", "threed", True
 
                         elif any(x in msg_lower for x in ["insufficient", "low balance", "not enough funds"]):
                             top_status, count_as, send_message = "Insufficient Funds 💵", "low", True
@@ -825,11 +825,14 @@ def handle_file(bot, message, allowed_users):
                                 if status == "CARD ADDED":
                                     status = "Card Added"
                                 # Build detailed message
+                                status_display = f"{status}{emoji}".rstrip()
+                                if status == "3DS_REQUIRED":
+                                    status_display = "⚠️ Requires Action"
                                 detail_msg = (
                                     f"<code><b>{top_status}</b></code>\n"
                                     f"━━━━━━━━━━━━━━━━━━\n"
                                     f"<code>✧ <b>Card:</b></code> <code>{card}</code>\n"
-                                    f"<code>✧ <b>Status:</b> {status}{emoji}</code>\n"
+                                    f"<code>✧ <b>Status:</b> {status_display}</code>\n"
                                     f"<code>✧ <b>Message:</b> {message_text}</code>\n"
                                     f"<code>✧ <b>Type:</b> {scheme} | {ctype} | {brand}</code>\n"
                                     f"<code>✧ <b>Bank:</b> {escape(bank)}</code>\n"
