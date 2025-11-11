@@ -6,6 +6,7 @@ import re
 import html
 import time
 from user_agents import get_random_user_agent
+from woo_helpers import build_registration_payload, is_logged_in
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -66,30 +67,77 @@ def analyze_site_page(text: str) -> dict:
     }
 def register_new_account(register_url: str, session: requests.Session = None):
     """
-    Registers a random account on the WooCommerce site.
-    Returns a requests.Session with cookies if successful, or None if failed.
+    Register a random account on the WooCommerce site.
+    Grabs dynamic form fields/nonce to avoid false negatives.
+    Returns a session seeded with cookies when successful.
     """
     sess = session or requests.Session()
+    user_agent = get_random_user_agent()
     headers = {
-        "User-Agent": get_random_user_agent(),
+        "User-Agent": user_agent,
         "Referer": register_url,
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
-    data = {
-        "email": generate_random_email(),
-        "username": generate_random_username(),
-        "password": generate_random_string(12)
-    }
+    email = generate_random_email()
+    username = generate_random_username()
+    password = generate_random_string(12)
+    first_name = generate_random_string(6).title()
+    last_name = generate_random_string(6).title()
 
     try:
-        resp = sess.post(register_url, headers=headers, data=data, timeout=15, allow_redirects=True)
-        if resp.status_code in (200, 302):
-            logger.info(f"[+] Registered new account: {data['email']} | {data['username']}")
-            return sess
-        else:
-            logger.warning(f"[!] Registration failed ({resp.status_code}): {resp.text[:300]}")
+        resp = sess.get(register_url, headers=headers, timeout=15)
+    except Exception as e:
+        logger.error(f"Registration page fetch failed: {e}")
+        return None
+
+    html_text = resp.text or ""
+    payload = build_registration_payload(
+        html_text,
+        email=email,
+        username=username,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+    )
+
+    if not payload:
+        logger.warning("[register_new_account] Unable to build registration payload (no fields detected)")
+        return None
+
+    try:
+        post_resp = sess.post(
+            register_url,
+            headers=headers,
+            data=payload,
+            timeout=20,
+            allow_redirects=True,
+        )
+        if post_resp.status_code not in (200, 302):
+            logger.warning(f"Registration failed ({post_resp.status_code}): {post_resp.text[:300]}")
             return None
+
+        html_after = post_resp.text or ""
+        if not html_after or not is_logged_in(html_after):
+            # Some themes redirect quietly—double check by loading account page.
+            try:
+                verify = sess.get(register_url, headers=headers, timeout=10)
+                if not is_logged_in(verify.text or ""):
+                    logger.warning("[register_new_account] Registration response does not indicate login")
+                    return None
+            except Exception:
+                logger.warning("[register_new_account] Verification request failed")
+                return None
+
+        logger.info(f"[+] Registered new account: {email} | {username}")
+        sess._account_credentials = {
+            "email": email,
+            "username": username,
+            "password": password,
+        }
+        sess.headers.update({"User-Agent": user_agent})
+        return sess
     except Exception as e:
         logger.error(f"Exception during registration: {e}")
         return None

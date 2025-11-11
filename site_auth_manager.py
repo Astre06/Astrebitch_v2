@@ -29,6 +29,11 @@ from requests.exceptions import ProxyError, ConnectTimeout, ConnectionError, Rea
 from config import PAYMENT_LIMIT, RETRY_COUNT, RETRY_DELAY
 from runtime_config import get_all_default_sites, get_default_site
 from user_agents import get_random_user_agent
+from woo_helpers import (
+    build_registration_payload,
+    build_login_payload,
+    is_logged_in,
+)
 
 from proxy_manager import get_user_proxy
 
@@ -527,34 +532,30 @@ class SiteAuthManager:
             if not hasattr(page, "text") or not page.text:
                 return None
 
-            if "<html" not in page.text.lower():
-                return None
+            login_html = page.text or ""
+            identifiers = []
+            if account.get("username"):
+                identifiers.append(account["username"])
+            if account.get("email") and account["email"] not in identifiers:
+                identifiers.append(account["email"])
 
-            nonce_match = re.search(r'name="woocommerce-login-nonce" value="([^"]+)"', page.text)
-            nonce = nonce_match.group(1) if nonce_match else None
+            for idx, identifier in enumerate(identifiers):
+                payload = build_login_payload(login_html, identifier, account["password"])
+                resp = safe_request(session, "post", self.register_url, headers=headers, data=payload, timeout=20)
+                if hasattr(resp, "text") and is_logged_in(resp.text):
+                    entry = self.state[self.chat_id]["sites"][self.site_url]
+                    entry["cookies"] = requests.utils.dict_from_cookiejar(session.cookies)
+                    entry["raw_cookies"] = session.cookies.get_dict(
+                        domain=self.site_url.replace("https://", "").replace("http://", "")
+                    )
+                    with open(self._user_site_file, "w", encoding="utf-8") as f:
+                        json.dump(self.state, f, indent=2)
+                    return session
 
-            data = {
-                "username": account["username"],
-                "password": account["password"],
-                "login": "Log in"
-            }
-            if nonce:
-                data["woocommerce-login-nonce"] = nonce
-
-            resp = safe_request(session, "post", self.register_url, headers=headers, data=data, timeout=20)
-            if not hasattr(resp, "text") or not resp.text:
-                return None
-
-            if "My account" in resp.text or "Logout" in resp.text:
-                entry = self.state[self.chat_id]["sites"][self.site_url]
-                entry["cookies"] = requests.utils.dict_from_cookiejar(session.cookies)
-                entry["raw_cookies"] = session.cookies.get_dict(
-                    domain=self.site_url.replace("https://", "").replace("http://", "")
-                )
-                with open(self._user_site_file, "w", encoding="utf-8") as f:
-                    json.dump(self.state, f, indent=2)
-
-                return session
+                # Refresh login page for next identifier
+                if idx + 1 < len(identifiers):
+                    page = safe_request(session, "get", self.register_url, headers=headers, timeout=10)
+                    login_html = page.text if page and hasattr(page, "text") else ""
 
             return None
 
@@ -572,37 +573,56 @@ class SiteAuthManager:
         email = generate_random_email()
         username = generate_random_username()
         password = generate_random_string(12)
+        first_name = generate_random_string(6).title()
+        last_name = generate_random_string(6).title()
 
         try:
             page = safe_request(session, "get", self.register_url, headers=headers, timeout=10)
             if not page or not hasattr(page, "text"):
                 return None
 
-            nonce_match = re.search(r'name="woocommerce-register-nonce" value="([^"]+)"', page.text)
-            nonce = nonce_match.group(1) if nonce_match else None
+            registration_html = page.text or ""
+            payload = build_registration_payload(
+                registration_html,
+                email=email,
+                username=username,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+            )
 
-            data = {"username": username, "email": email, "password": password, "register": "Register"}
-            if nonce:
-                data["woocommerce-register-nonce"] = nonce
+            if not payload:
+                return None
 
-            resp = safe_request(session, "post", self.register_url, headers=headers, data=data, timeout=20)
+            resp = safe_request(session, "post", self.register_url, headers=headers, data=payload, timeout=20)
             if not resp or not hasattr(resp, "text"):
                 return None
 
-            if "My account" in resp.text or "Logout" in resp.text:
-                entry = self.state[self.chat_id]["sites"][self.site_url]
-                entry["accounts"] = [{"email": email, "username": username, "password": password}]
-                entry["payment_count"] = 0
-                entry["cookies"] = requests.utils.dict_from_cookiejar(session.cookies)
-                entry["raw_cookies"] = session.cookies.get_dict(
-                    domain=self.site_url.replace("https://", "").replace("http://", "")
-                )
-                with open(self._user_site_file, "w", encoding="utf-8") as f:
-                    json.dump(self.state, f, indent=2)
+            if not is_logged_in(resp.text):
+                verify = safe_request(session, "get", self.register_url, headers=headers, timeout=10)
+                if not verify or not is_logged_in(getattr(verify, "text", "")):
+                    return None
 
-                return session
+            entry = self.state[self.chat_id]["sites"][self.site_url]
+            entry["accounts"] = [{
+                "email": email,
+                "username": username,
+                "password": password
+            }]
+            entry["payment_count"] = 0
+            entry["cookies"] = requests.utils.dict_from_cookiejar(session.cookies)
+            entry["raw_cookies"] = session.cookies.get_dict(
+                domain=self.site_url.replace("https://", "").replace("http://", "")
+            )
+            with open(self._user_site_file, "w", encoding="utf-8") as f:
+                json.dump(self.state, f, indent=2)
 
-            return None
+            session._account_credentials = {
+                "email": email,
+                "username": username,
+                "password": password,
+            }
+            return session
 
         except Exception:
             return None
