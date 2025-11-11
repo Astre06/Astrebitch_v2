@@ -192,13 +192,6 @@ bot.send_document = _safe_wrapper("send_document", _original_send_document)
 bot.send_photo = _safe_wrapper("send_photo", _original_send_photo)
 bot.send_video = _safe_wrapper("send_video", _original_send_video)
 
-# Centralized dispatcher for Telegram calls
-dispatcher = MessageDispatcher(bot, rate_per_second=20, max_retries=5)
-set_message_dispatcher(dispatcher)
-set_manual_dispatcher(dispatcher)
-set_mass_dispatcher(dispatcher)
-start_busy_watchdog(bot)
-
 # Register mass check system (STOP + Resume callbacks)
 from mass_check import activechecks
 clean_waiting_users = set()
@@ -312,6 +305,14 @@ def start_busy_watchdog(bot, timeout: int = BUSY_TIMEOUT_SECONDS, interval: int 
                 clear_user_busy(chat_id)
 
     threading.Thread(target=monitor, daemon=True).start()
+
+
+# Centralized dispatcher for Telegram calls
+dispatcher = MessageDispatcher(bot, rate_per_second=20, max_retries=5)
+set_message_dispatcher(dispatcher)
+set_manual_dispatcher(dispatcher)
+set_mass_dispatcher(dispatcher)
+start_busy_watchdog(bot)
 
 
 from cardgen import (
