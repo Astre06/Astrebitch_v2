@@ -124,8 +124,6 @@ LIVE_MESSAGE_GAP_DEFAULT = 1.0   # per-target minimal gap for live notifications
 LIVE_MESSAGE_GAP_CHANNEL = 1.2   # slightly higher gap when posting to channel broadcasts
 STOP_CHECK_INTERVAL = 0.2
 
-PROGRESS_INITIAL_UPDATES = (1, 5, 10)
-PROGRESS_UPDATE_INTERVAL = 10
 DECLINED_UPDATE_GAP = 5
 
 _live_send_lock = threading.Lock()
@@ -723,6 +721,13 @@ def _handle_file_impl(bot, message, allowed_users):
                 "status": None,
                 "reason": None,
                 "declined": 0,
+                "processed_display": 0,
+                "declined_checkpoint": 0,
+                "last_non_decline_ts": 0.0,
+            }
+            milestone_state = {
+                "processed": 0,
+                "card": None,
             }
 
             # 🛑 Force cancel any unfinished tasks when stop is pressed
@@ -1106,8 +1111,28 @@ def _handle_file_impl(bot, message, allowed_users):
                         # -----------------------------------------
                         # 🔁 UPDATE PROGRESS BOARD
                         # -----------------------------------------
-                        should_update_board = False
+                        msg_lower = message_text.lower()
                         short_reason = message_text
+                        if any(x in msg_lower for x in ["card number is incorrect", "your card is incorrect", "incorrect number"]):
+                            short_reason = "Your card number is incorrect"
+                        elif any(x in msg_lower for x in ["does not support", "unsupported"]):
+                            short_reason = "Your card does not support this type of purchase"
+                        elif any(x in msg_lower for x in ["requires_action", "3ds", "authentication required"]):
+                            short_reason = "3DS"
+                        elif any(x in msg_lower for x in ["insufficient", "low balance"]):
+                            short_reason = "Insufficient funds"
+                        elif any(x in msg_lower for x in ["security code", "cvc", "cvv"]):
+                            short_reason = "You card Security is incorrect"
+                        elif any(x in msg_lower for x in ["expired", "expiration"]):
+                            short_reason = "Card expired"
+                        elif "stripe" in msg_lower:
+                            short_reason = "Stripe Token Error"
+                        elif "site" in msg_lower:
+                            short_reason = "Site Response Failed"
+
+                        is_declined_status = top_status.strip().upper().startswith("DECLINED")
+                        board_update_payload = None
+
                         with progress_lock:
                             counters["total_processed"] += 1
                             counters[count_as] += 1
@@ -1120,41 +1145,40 @@ def _handle_file_impl(bot, message, allowed_users):
                             low = counters["low"]
                             declined = counters["declined"]
 
-                            msg_lower = message_text.lower()
-                            if any(x in msg_lower for x in ["card number is incorrect", "your card is incorrect", "incorrect number"]):
-                                short_reason = "Your card number is incorrect"
-                            elif any(x in msg_lower for x in ["does not support", "unsupported"]):
-                                short_reason = "Your card does not support this type of purchase"
-                            elif any(x in msg_lower for x in ["requires_action", "3ds", "authentication required"]):
-                                short_reason = "3DS"
-                            elif any(x in msg_lower for x in ["insufficient", "low balance"]):
-                                short_reason = "Insufficient funds"
-                            elif any(x in msg_lower for x in ["security code", "cvc", "cvv"]):
-                                short_reason = "You card Security is incorrect"
-                            elif any(x in msg_lower for x in ["expired", "expiration"]):
-                                short_reason = "Card expired"
-                            elif "stripe" in msg_lower:
-                                short_reason = "Stripe Token Error"
-                            elif "site" in msg_lower:
-                                short_reason = "Site Response Failed"
-                            else:
-                                short_reason = message_text
+                            now_ts = time.time()
 
-                            processed_since_last = processed - last_board_update["processed"]
-                            declined_since_last = declined - last_board_update["declined"]
-                            is_declined_status = top_status.strip().upper().startswith("DECLINED")
+                            milestone_candidate = milestone_state["processed"]
+                            if processed == total_cards or total_cards < 5:
+                                milestone_candidate = processed
+                            elif processed >= 5 and processed % 5 == 0:
+                                milestone_candidate = processed
 
-                            if processed in PROGRESS_INITIAL_UPDATES:
+                            if milestone_candidate != milestone_state["processed"] and processed == milestone_candidate:
+                                milestone_state["processed"] = milestone_candidate
+                                milestone_state["card"] = card
+
+                            if processed == total_cards:
+                                milestone_state["processed"] = processed
+                                milestone_state["card"] = card
+
+                            display_processed = milestone_state["processed"]
+                            if display_processed == 0:
+                                if processed == total_cards or total_cards < 5:
+                                    display_processed = processed
+
+                            display_card = milestone_state["card"] if milestone_state["card"] else card
+
+                            declined_since_last = declined - last_board_update["declined_checkpoint"]
+
+                            should_update_board = False
+                            if processed == total_cards and last_board_update["processed_display"] != processed:
                                 should_update_board = True
-                            elif processed % PROGRESS_UPDATE_INTERVAL == 0 and processed != last_board_update["processed"]:
-                                should_update_board = True
-                            elif processed_since_last >= PROGRESS_UPDATE_INTERVAL:
-                                should_update_board = True
-                            elif processed == total_cards:
+                            elif display_processed > last_board_update["processed_display"]:
                                 should_update_board = True
                             elif not is_declined_status:
-                                should_update_board = True
-                            elif is_declined_status and declined_since_last >= DECLINED_UPDATE_GAP:
+                                if now_ts - last_board_update["last_non_decline_ts"] >= 1.0:
+                                    should_update_board = True
+                            elif declined_since_last >= DECLINED_UPDATE_GAP:
                                 should_update_board = True
 
                             if should_update_board:
@@ -1163,16 +1187,40 @@ def _handle_file_impl(bot, message, allowed_users):
                                     "status": top_status,
                                     "reason": short_reason,
                                     "declined": declined,
+                                    "processed_display": display_processed,
+                                    "declined_checkpoint": declined,
                                 })
+                                if not is_declined_status:
+                                    last_board_update["last_non_decline_ts"] = now_ts
+                                board_update_payload = {
+                                    "card": display_card,
+                                    "processed_display": display_processed,
+                                    "total_cards": total_cards,
+                                    "status": top_status,
+                                    "reason": short_reason,
+                                    "cvv": cvv,
+                                    "ccn": ccn,
+                                    "threed": threed,
+                                    "low": low,
+                                    "declined": declined,
+                                }
 
-                        if should_update_board:
+                        if board_update_payload:
                             checking = not is_stop_requested(chat_id)
-                            status_text = f"Processing {processed}/{total_cards} cards..."
+                            status_text = f"Processing {board_update_payload['processed_display']}/{board_update_payload['total_cards']} cards..."
                             kb = build_status_keyboard(
-                                card, total_cards, processed, top_status,
-                                cvv, ccn, threed, low, declined,
-                                checking, chat_id,
-                                reason=short_reason
+                                board_update_payload["card"],
+                                board_update_payload["total_cards"],
+                                board_update_payload["processed_display"],
+                                board_update_payload["status"],
+                                board_update_payload["cvv"],
+                                board_update_payload["ccn"],
+                                board_update_payload["threed"],
+                                board_update_payload["low"],
+                                board_update_payload["declined"],
+                                checking,
+                                chat_id,
+                                reason=board_update_payload["reason"],
                             )
 
                             try:
