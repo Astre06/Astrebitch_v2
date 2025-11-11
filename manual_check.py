@@ -3,13 +3,13 @@ import time
 import threading
 from html import escape
 from config import CHANNEL_ID
-from site_auth_manager import process_card_for_user_sites, _load_state
+from site_auth_manager import _load_state
 from bininfo import round_robin_bin_lookup
 from proxy_manager import get_user_proxy
 import pycountry
 from runtime_config import get_default_site
 from shared_state import user_busy
-from shared_state import save_live_cc_to_json
+from shared_state import save_live_cc_to_json, try_process_with_retries
 
 # ✅ Per-user locks
 user_locks = {}
@@ -216,7 +216,14 @@ def process_manual_check(bot, message, allowed_users):
                 return
 
                         
-            site_url, result = process_card_for_user_sites(card_data, chat_id, proxy=user_proxy)
+            site_url, result = try_process_with_retries(
+                card_data,
+                chat_id,
+                user_proxy=user_proxy,
+                worker_id=None,
+            )
+            if not isinstance(result, dict):
+                result = {"status": "DECLINED", "reason": str(result or "Unknown error")}
 
             # ✅ Ensure proxy flag is always present
             if isinstance(result, dict):
