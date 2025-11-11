@@ -204,6 +204,34 @@ def queue_live_notification(bot, target_id: str, text: str, *, base_delay: float
     return effective_delay
 
 
+def wait_for_live_queue_flush(pending_live: int = 0, *, buffer: float = 0.4):
+    """
+    Best-effort wait until all queued live notifications finish sending.
+    Sleeps until the last scheduled live send time has passed, then blocks on the
+    dispatcher (if available) for a short period to let remaining tasks drain.
+    """
+    if pending_live <= 0:
+        return
+
+    with _live_send_lock:
+        last_scheduled = _next_live_send - LIVE_MESSAGE_GAP
+
+    remaining = last_scheduled - time.time()
+    if remaining > 0:
+        sleep_duration = remaining + max(buffer, 0.1)
+        logger.debug(
+            f"[QUEUE FLUSH] Waiting {sleep_duration:.2f}s for {pending_live} live notifications to finish."
+        )
+        time.sleep(sleep_duration)
+
+    if _dispatcher:
+        extra_timeout = max(5.0, pending_live * 0.35)
+        if not _dispatcher.wait_until_idle(timeout=extra_timeout):
+            logger.warning(
+                f"[QUEUE FLUSH] Dispatcher still busy after waiting {extra_timeout:.1f}s (pending_live={pending_live})."
+            )
+
+
 # ================================================================
 # ⚠️ EXCEPTIONS
 # ================================================================
@@ -1162,6 +1190,9 @@ def _handle_file_impl(bot, message, allowed_users):
                 total = counters["total_processed"]
                 cancel_pending_futures()
 
+                if live_count > 0:
+                    wait_for_live_queue_flush(live_count)
+
 
                 summary = (
                     f"🛑 <b>Mass Check Stopped</b>\n\n"
@@ -1268,6 +1299,7 @@ def _handle_file_impl(bot, message, allowed_users):
 
             # Send results file
             if live_count > 0:
+                wait_for_live_queue_flush(live_count)
                 try:
                     bot.send_message(chat_id, summary, parse_mode="HTML")
                 except Exception:
