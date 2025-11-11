@@ -61,14 +61,44 @@ def get_next_user_site(chat_id):
         return get_default_site()
 
     with _site_lock:
-        # Reset rotation if user added/removed sites
-        if set(sites) != set(_site_rotation.get(chat_id, [])):
-            _site_rotation[chat_id] = []
-        if chat_id not in _site_rotation or not _site_rotation[chat_id]:
+        rotation_entry = _site_rotation.get(chat_id)
+
+        # Backwards compatibility with legacy list format
+        if isinstance(rotation_entry, list):
+            rotation_entry = {
+                "remaining": rotation_entry,
+                "snapshot": list(rotation_entry),
+            }
+
+        site_set = set(sites)
+        if (
+            not rotation_entry
+            or set(rotation_entry.get("snapshot", [])) != site_set
+        ):
             shuffled = sites[:]
             random.shuffle(shuffled)
-            _site_rotation[chat_id] = shuffled
-        return _site_rotation[chat_id].pop(0)
+            rotation_entry = {
+                "remaining": shuffled,
+                "snapshot": list(sites),
+            }
+
+        remaining = rotation_entry.get("remaining", [])
+        if not remaining:
+            remaining = sites[:]
+            random.shuffle(remaining)
+            rotation_entry["remaining"] = remaining
+            rotation_entry["snapshot"] = list(sites)
+
+        next_site = rotation_entry["remaining"].pop(0)
+
+        if not rotation_entry["remaining"]:
+            refreshed = sites[:]
+            random.shuffle(refreshed)
+            rotation_entry["remaining"] = refreshed
+            rotation_entry["snapshot"] = list(sites)
+
+        _site_rotation[chat_id] = rotation_entry
+        return next_site
 
 
 

@@ -8,6 +8,7 @@ import json
 import threading
 import logging
 import time
+import random
 from datetime import datetime
 from collections import defaultdict
 
@@ -132,7 +133,7 @@ def save_live_cc_to_json(user_id: str, worker_id: int, live_data: dict):
 # 🔁 Shared Function — Retry logic for site checks (Manual + Mass)
 # ================================================================
 def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None, max_tries=None, stop_checker=None):
-    from site_auth_manager import remove_user_site, _load_state, process_card_for_user_sites
+    from site_auth_manager import remove_user_site, _load_state, process_card_for_user_sites, get_next_user_site
 
     def should_stop() -> bool:
         try:
@@ -153,7 +154,18 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
     if not user_sites:
         return None, {"status": "DECLINED", "reason": "No sites configured", "site_dead": True}
 
-    sites_queue = user_sites.copy()
+    # Determine randomized rotation order for this check
+    try:
+        primary_site = get_next_user_site(chat_id)
+    except Exception:
+        primary_site = None
+
+    if primary_site and primary_site in user_sites:
+        remaining_sites = [site for site in user_sites if site != primary_site]
+        random.shuffle(remaining_sites)
+        sites_queue = [primary_site, *remaining_sites]
+    else:
+        sites_queue = random.sample(user_sites, k=len(user_sites))
     site_retry_counts = defaultdict(int)
     confirmed_dead_sites = []
     last_site_used = None
