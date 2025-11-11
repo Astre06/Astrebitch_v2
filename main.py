@@ -58,7 +58,7 @@ from proxy_manager import (
 
 
 from mass_check import (
-    handle_file as handle_mass_file,
+    handle_file,
     run_mass_check_thread,   # thread launcher we use on file upload
     get_stop_event,
     set_stop_event,
@@ -66,6 +66,7 @@ from mass_check import (
     is_stop_requested,
     stop_events,
     set_dispatcher as set_mass_dispatcher,
+    is_mass_check_active,
 )
 
 
@@ -193,16 +194,12 @@ bot.send_document = _safe_wrapper("send_document", _original_send_document)
 bot.send_photo = _safe_wrapper("send_photo", _original_send_photo)
 bot.send_video = _safe_wrapper("send_video", _original_send_video)
 
-# Register mass check system (STOP + Resume callbacks)
-from mass_check import activechecks
 clean_waiting_users = set()
 def is_user_busy(chat_id: str):
     """Return True if user currently has an active mass or manual check."""
     if shared_is_user_busy(chat_id):
         return True
-
-    # Mass check running?
-    if chat_id in activechecks:
+    if is_mass_check_active(chat_id):
         return True
 
     # Manual check running?
@@ -327,11 +324,6 @@ from bininfo import round_robin_bin_lookup
 from sitechk import get_base_url
 from proxy_manager import parse_proxy_line
 from manual_check import register_manual_check
-from mass_check import handle_file
-
-
-
-
 # -------------------------------------------------
 # Base Directory
 # -------------------------------------------------
@@ -2666,8 +2658,7 @@ def handle_clean_file(message):
     # ⚙️ If user is not in cleaning mode, file goes to mass check
     if chat_id not in waiting_for_clean:
         try:
-            from mass_check import handle_file
-            handle_file(bot, message, allowed_users)
+            run_mass_check_thread(bot, message, allowed_users)
         except Exception as e:
             bot.reply_to(message, f"⚠️ Error processing file in mass check: {e}")
         return
@@ -2794,11 +2785,7 @@ def mass_command_handler(message):
                 clear_stop_event(chat_id)
 
                 # ✅ Start mass check silently in background
-                threading.Thread(
-                    target=handle_file,
-                    args=(bot, replied, allowed_users),  # ← added allowed_users here
-                    daemon=True
-                ).start()
+                run_mass_check_thread(bot, replied, allowed_users)
                 logging.debug(f"[MASS] Started mass check thread for {chat_id}")
                 return
             else:
@@ -2817,7 +2804,7 @@ def mass_command_handler(message):
             # Start mass check silently
             threading.Thread(
                 target=handle_file,
-                args=(bot, message),
+                args=(bot, message, allowed_users),
                 daemon=True
             ).start()
             logging.debug(f"[MASS] Started mass check from text for {chat_id}")
@@ -2934,13 +2921,7 @@ def mass_check_handler(message):
         reset_user_states(chat_id)
         clear_stop_event(chat_id)
 
-        # Launch mass check thread
-        t = threading.Thread(
-            target=handle_file,
-            args=(bot, message, allowed_users),
-            daemon=True,
-        )
-        t.start()
+        run_mass_check_thread(bot, message, allowed_users)
         logging.debug(f"[THREAD STARTED] Mass check thread for {chat_id}")
 
     except Exception as e:

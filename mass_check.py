@@ -117,6 +117,7 @@ outfile_lock = threading.Lock()
 stop_events = {}
 stop_events_lock = threading.Lock()
 activechecks = {}  # {user_id: Thread}
+activechecks_lock = threading.Lock()
 
 WORKER_CARD_PAUSE = 2.0  # seconds delay between cards per worker
 LIVE_MESSAGE_GAP = 1.2   # minimal gap between live notifications globally (seconds)
@@ -128,6 +129,40 @@ DECLINED_UPDATE_GAP = 5
 
 _live_send_lock = threading.Lock()
 _next_live_send = 0.0
+
+
+def is_mass_check_active(chat_id: str) -> bool:
+    """Return True if the user currently has an active mass-check thread."""
+    with activechecks_lock:
+        thread = activechecks.get(chat_id)
+        return bool(thread and thread.is_alive())
+
+
+def _register_active_thread(chat_id: str, thread: threading.Thread) -> bool:
+    """
+    Track the thread responsible for a user's mass check.
+    Returns False if another live thread exists for the same user.
+    """
+    with activechecks_lock:
+        existing = activechecks.get(chat_id)
+        if existing and existing is not thread and existing.is_alive():
+            return False
+        activechecks[chat_id] = thread
+        return True
+
+
+def _clear_active_thread(chat_id: str, thread: threading.Thread | None = None):
+    """
+    Remove the active thread entry for a user.
+    If `thread` is provided, only clear when it matches the stored one.
+    """
+    with activechecks_lock:
+        if thread is None:
+            activechecks.pop(chat_id, None)
+            return
+        current = activechecks.get(chat_id)
+        if current is thread:
+            activechecks.pop(chat_id, None)
 
 
 def sleep_with_stop(chat_id: str, seconds: float, check_interval: float = STOP_CHECK_INTERVAL) -> bool:
@@ -457,24 +492,24 @@ def run_mass_check_thread(bot, message, allowed_users=None):
     """Spawn a per-user background thread to run handle_file()."""
     chat_id = str(message.chat.id)
 
-    if chat_id in activechecks:
-        bot.reply_to(message, "⚠ Already running. Please wait for your previous session.")
-        return
-
     t = threading.Thread(
         target=handle_file,
         args=(bot, message, allowed_users),
         daemon=True
     )
-    activechecks[chat_id] = t
+
+    if not _register_active_thread(chat_id, t):
+        bot.reply_to(message, "⚠ Already running. Please wait for your previous session.")
+        return
+
     t.start()
     logger.info(f"[THREAD] Mass check thread launched for {chat_id}")
 
 
 # ================================================================
-# 📂 MAIN MASS CHECK HANDLER
+# 📂 MAIN MASS CHECK HANDLER (implementation)
 # ================================================================
-def handle_file(bot, message, allowed_users):
+def _handle_file_impl(bot, message, allowed_users):
     chat_id = str(message.chat.id)
 
     def _get_active_sites():
@@ -526,12 +561,6 @@ def handle_file(bot, message, allowed_users):
     stop_event.clear()
     clear_stop_event(chat_id)
     cleanup_all_raw_files(chat_id)
-
-
-    # Prevent overlap
-    if chat_id in activechecks and activechecks[chat_id].is_alive():
-        bot.reply_to(message, "⚠ You already have an active mass check.")
-        return
 
 
     # 🧠 Create per-user lock
@@ -1195,9 +1224,6 @@ def handle_file(bot, message, allowed_users):
                         lock.release()
                     clear_user_busy(chat_id)
 
-                    # Remove tracking entry
-                    activechecks.pop(chat_id, None)
-
                     # Clear stop event so the user can restart right away
                     clear_stop_event(chat_id)
 
@@ -1297,12 +1323,6 @@ def handle_file(bot, message, allowed_users):
             sleep_with_stop(chat_id, 0.5)
             cleanup_all_raw_files(chat_id)
             clear_user_busy(chat_id)
-            activechecks.pop(chat_id, None)
-
-
-            # 🧠 Remove user tracking safely
-            if chat_id in activechecks:
-                del activechecks[chat_id]
 
             if lock.locked():
                 lock.release()
@@ -1315,6 +1335,25 @@ def handle_file(bot, message, allowed_users):
         # Schedule delayed recheck cleanup in 5s (ensures deletion after background threads)
         clear_user_busy(chat_id)
         threading.Timer(5.0, cleanup_all_raw_files, args=(chat_id,)).start()
+
+
+def handle_file(bot, message, allowed_users):
+    """
+    Public entry point that ensures per-user thread tracking before delegating to the
+    implementation. This wrapper lets callers start the worker either directly or via
+    run_mass_check_thread while keeping concurrency guards consistent.
+    """
+    chat_id = str(message.chat.id)
+    current_thread = threading.current_thread()
+
+    if not _register_active_thread(chat_id, current_thread):
+        bot.reply_to(message, "⚠ You already have an active mass check.")
+        return
+
+    try:
+        _handle_file_impl(bot, message, allowed_users)
+    finally:
+        _clear_active_thread(chat_id, current_thread)
 
 
 def merge_livecc_user_files(user_id: str, max_workers: int = 5):
