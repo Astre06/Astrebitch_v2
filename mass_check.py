@@ -11,10 +11,15 @@ import shutil
 import glob
 import json
 from datetime import datetime
-from shared_state import user_busy
+from shared_state import (
+    is_user_busy,
+    set_user_busy,
+    clear_user_busy,
+    save_live_cc_to_json,
+    try_process_with_retries,
+)
 from site_auth_manager import clone_user_site_files
 from config import MAX_WORKERS
-from shared_state import save_live_cc_to_json
 # ================================================================
 # ⚙️ CONFIG IMPORTS  (Matches your real config.py)
 # ================================================================
@@ -38,8 +43,20 @@ last_send_time = 0.0
 
 from telebot.apihelper import ApiTelegramException
 
+_dispatcher = None
+
+
+def set_dispatcher(dispatcher):
+    global _dispatcher
+    _dispatcher = dispatcher
+
+
 def safe_send_message(bot, target_id, text, **kwargs):
     """Send Telegram message safely, respecting flood limits."""
+    if _dispatcher:
+        _dispatcher.enqueue("send_message", target_id, text, **kwargs)
+        return
+
     import logging
     while True:
         try:
@@ -437,12 +454,12 @@ def handle_file(bot, message, allowed_users):
 
 
     # 🚦 Prevent overlap with manual check or another mass check
-    if user_busy.get(chat_id):
+    if is_user_busy(chat_id):
         bot.reply_to(message, "⚠ You already have an active check running (manual or mass). Please wait.")
         return
 
     # 🟢 Mark user as busy
-    user_busy[chat_id] = True
+    set_user_busy(chat_id, "mass")
 
     stop_event.clear()
     clear_stop_event(chat_id)
@@ -494,7 +511,7 @@ def handle_file(bot, message, allowed_users):
         bot.reply_to(message, "❌ No valid cards found in file.")
         cleanup_user_file(chat_id)
         lock.release()
-        user_busy[chat_id] = False
+        clear_user_busy(chat_id)
         return
 
     # Initialize counters
@@ -1043,7 +1060,7 @@ def handle_file(bot, message, allowed_users):
                     # Release user lock and busy flag *immediately* so interface unfreezes
                     if lock.locked():
                         lock.release()
-                    user_busy[chat_id] = False
+                    clear_user_busy(chat_id)
 
                     # Remove tracking entry
                     activechecks.pop(chat_id, None)
@@ -1146,7 +1163,7 @@ def handle_file(bot, message, allowed_users):
             # 🧹 Delay raw result cleanup to ensure outfile handle fully closed
             time.sleep(0.5)
             cleanup_all_raw_files(chat_id)
-            user_busy.pop(chat_id, None)
+            clear_user_busy(chat_id)
             activechecks.pop(chat_id, None)
 
 
@@ -1163,7 +1180,7 @@ def handle_file(bot, message, allowed_users):
             logger.error(f"[FINAL CLEANUP ERROR] {e}")
 
         # Schedule delayed recheck cleanup in 5s (ensures deletion after background threads)
-        user_busy[chat_id] = False
+        clear_user_busy(chat_id)
         threading.Timer(5.0, cleanup_all_raw_files, args=(chat_id,)).start()
 
 

