@@ -456,7 +456,7 @@ def process_manual_check(bot, message, allowed_users):
 
         safe_raw_card = escape(raw_card_for_bin)
         final_msg = (
-            f"<code><b>{top_status}</b></code>\n"
+            f"<b>{top_status}</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<code>✧ <b>Card:</b></code> <code>{safe_raw_card}</code>\n"
             f"<code>✧ <b>Gateway:</b> Stripe Auth</code>\n"
@@ -519,4 +519,5 @@ def process_manual_check(bot, message, allowed_users):
             # Avoid crash if lock state changed during release
             import logging
             logging.warning(f"[LOCK RELEASE WARNING] {e}")
+
 
