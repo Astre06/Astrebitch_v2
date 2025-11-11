@@ -21,6 +21,7 @@ import random
 import string
 import threading
 import requests
+import glob
 from config import DEFAULT_API_URL
 from urllib.parse import urlparse
 from requests.utils import dict_from_cookiejar, cookiejar_from_dict
@@ -147,7 +148,7 @@ def _save_state(state, chat_id: str):
             json.dump(cleaned, f, indent=2)
         os.replace(tmp, path)
 # --- Step 1: helper to remove a user's dead site safely ---
-def remove_user_site(chat_id: str, site_url: str) -> bool:
+def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) -> bool:
     """
     Remove a site from the user's JSON state if it exists.
     Returns True if a site entry was removed, False otherwise.
@@ -161,11 +162,32 @@ def remove_user_site(chat_id: str, site_url: str) -> bool:
             return False
 
         sites = user_entry.get("sites", {})
+        removed = False
         if site_url in sites:
             del sites[site_url]
             _save_state(state, chat_id)
+            removed = True
             print(f"[REMOVE_SITE] Removed dead site for user {chat_id}: {site_url}")
-            return True
+
+        # Also remove from worker-specific site files so the dead site cannot be reused.
+        user_dir = os.path.join("sites", chat_id)
+        if os.path.isdir(user_dir):
+            pattern = f"sites_{chat_id}_{worker_id}.json" if worker_id else f"sites_{chat_id}_*.json"
+            for path in glob.glob(os.path.join(user_dir, pattern)):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        worker_state = json.load(f)
+                    worker_entry = worker_state.get(chat_id, {}).get("sites", {})
+                    if site_url in worker_entry:
+                        del worker_state[chat_id]["sites"][site_url]
+                        with open(path, "w", encoding="utf-8") as f:
+                            json.dump(worker_state, f, indent=2)
+                        print(f"[REMOVE_SITE] Removed dead site from {os.path.basename(path)} for user {chat_id}")
+                        removed = True
+                except Exception as e:
+                    print(f"[REMOVE_SITE ERROR] Failed to update {path}: {e}")
+
+        return removed
     except Exception as e:
         print(f"[REMOVE_SITE ERROR] {e}")
     return False
@@ -1201,7 +1223,7 @@ def normalize_result(status_raw: str, err_msg: str = ""):
 # ==========================================================
 # PROCESS CARD FOR USER SITES (Auto-default site if missing)
 # ==========================================================
-def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None):
+def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, preferred_site=None):
     from mass_check import is_stop_requested
 
     # 🛑 Stop check before anything starts
@@ -1241,6 +1263,23 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None):
     # If user has sites — get first and mode
     first_site = user_sites[0]
     mode = state[chat_id]["sites"][first_site].get("mode", "all").lower()
+
+    # =======================================================
+    # FORCE SPECIFIC SITE (for retry confirmations)
+    # =======================================================
+    if preferred_site:
+        target_site = preferred_site
+        if is_stop_requested(str(chat_id)):
+            print(f"[PROCESS STOP] User {chat_id} stopped before forced site processing.")
+            return None, {"status": "STOPPED", "reason": "User requested stop"}
+
+        manager = SiteAuthManager(target_site, chat_id, proxy, worker_id=worker_id)
+        result = manager.process_card(ccx)
+
+        if isinstance(result, dict):
+            result["_used_proxy"] = getattr(manager, "_used_proxy", False)
+
+        return manager.site_url, result
 
     # =======================================================
     # MODE: ROTATE  (random + round robin)

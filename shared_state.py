@@ -9,6 +9,7 @@ import threading
 import logging
 import time
 from datetime import datetime
+from collections import defaultdict
 
 user_busy = {}
 _busy_records = {}
@@ -133,9 +134,6 @@ def save_live_cc_to_json(user_id: str, worker_id: int, live_data: dict):
 def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None, max_tries=None):
     from site_auth_manager import remove_user_site, _load_state, process_card_for_user_sites
 
-    tries = 0
-    site_url, result = None, None
-
     # 🧩 Load once at start, cache sites in memory
     try:
         state = _load_state(chat_id)
@@ -146,63 +144,88 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
     if not user_sites:
         return None, {"status": "DECLINED", "reason": "No sites configured", "site_dead": True}
 
-    max_tries = max_tries or len(user_sites)
-    dead_sites = []
-    last_reason = None
+    sites_queue = user_sites.copy()
+    site_retry_counts = defaultdict(int)
+    confirmed_dead_sites = []
+    last_site_used = None
+    result = None
+    last_failure_reason = None
 
-    while tries < max_tries and user_sites:
-        site_url = user_sites[0]  # always use first available site
-        print(f"[TRY] ({tries+1}/{max_tries}) Using site: {site_url}")
+    base_attempts = max(len(sites_queue), 1)
+    max_attempts = max(max_tries or base_attempts, base_attempts) * 2
+    attempts = 0
+
+    def _is_potential_dead(reason_text: str) -> bool:
+        reason_lower = (reason_text or "").lower()
+        keyword_match = any(
+            key in reason_lower
+            for key in (
+                "site response failed",
+                "site no response",
+                "stripe token error",
+            )
+        )
+        return keyword_match
+
+    while sites_queue and attempts < max_attempts:
+        current_site = sites_queue[0]
+        site_retry_counts[current_site] += 1
+        attempts += 1
+
+        print(f"[TRY] Attempt {attempts}/{max_attempts} using site: {current_site} (retry #{site_retry_counts[current_site]})")
 
         site_url, result = process_card_for_user_sites(
             card_data,
             chat_id,
             proxy=user_proxy,
             worker_id=worker_id,
+            preferred_site=current_site,
         )
-        tries += 1
 
-        # Normalize result
         if not isinstance(result, dict):
             result = {"status": "DECLINED", "reason": str(result or "Invalid result")}
 
-        reason = (result.get("reason") or "").lower()
-        last_reason = reason
+        reason_text = result.get("reason") or result.get("message") or ""
+        last_failure_reason = reason_text
+        potential_dead = _is_potential_dead(reason_text)
 
-        # 🧨 Detect real site failure
-        if (
-            result.get("site_dead")
-            or "site response failed" in reason
-            or ("request failed" in reason and "stripe" in reason)
-            or "timeout" in reason
-        ):
-            print(f"[AUTO] Marking site as dead (retry next): {site_url}")
-            dead_sites.append(site_url)
-            if site_url in user_sites:
-                user_sites.remove(site_url)
-            continue  # retry next available site
+        if potential_dead:
+            if site_retry_counts[current_site] < 2:
+                print(f"[RETRY] {current_site} flagged as dead. Retrying once more to confirm.")
+                continue
 
-        # ✅ Stop retrying — site responded (even if declined)
-        print(f"[SUCCESS] Site responded successfully: {site_url}")
+            print(f"[CONFIRM] Removing dead site after confirmation: {current_site}")
+            confirmed_dead_sites.append(current_site)
+            sites_queue.pop(0)
+            continue
+
+        # ✅ Site responded (even if declined)
+        last_site_used = site_url or current_site
         break
 
     # 🧹 Clean up dead sites permanently
-    for s in dead_sites:
+    for dead_site in confirmed_dead_sites:
         try:
-            removed = remove_user_site(chat_id, s)
+            removed = remove_user_site(chat_id, dead_site, worker_id=worker_id)
             if removed:
-                print(f"[AUTO] Permanently removed dead site: {s}")
+                print(f"[AUTO] Permanently removed dead site: {dead_site}")
         except Exception as e:
-            print(f"[AUTO] Error removing site {s}: {e}")
+            print(f"[AUTO] Error removing site {dead_site}: {e}")
 
-    # 🧠 If no sites left AND we never got a valid response
-    if not user_sites and (not result or result.get("site_dead")):
-        print("[FAIL] All sites failed or removed.")
+    # 🧠 No site produced a valid response
+    if last_site_used is None:
+        print("[FAIL] All sites failed or were removed during retries.")
+        fallback_reason = "All your sites have died during checking. Please add new ones."
         return None, {
             "status": "DECLINED",
-            "reason": "All sites failed or removed",
+            "reason": fallback_reason,
             "site_dead": True,
+            "dead_sites_removed": confirmed_dead_sites,
+            "last_failure_reason": last_failure_reason,
         }
 
-    # ✅ Return working site and result
-    return site_url, result
+    # ✅ Annotate result with removal metadata for callers
+    if isinstance(result, dict):
+        result.setdefault("dead_sites_removed", confirmed_dead_sites)
+
+    return last_site_used, result
