@@ -1050,7 +1050,7 @@ class SiteAuthManager:
             elif any(x in err_msg for x in ["insufficient", "low balance", "not enough funds"]):
                 status, reason = "INSUFFICIENT_FUNDS", "Insufficient funds."
             elif any(x in err_msg for x in ["does not support", "unsupported", "not supported"]):
-                status, reason = "CVV", "Your card does not support this type of purchase."
+                status, reason = "APPROVED", "Your card does not support this type of purchase."
             elif any(x in err_msg for x in ["expired", "expiration", "invalid expiry"]):
                 status, reason = "DECLINED", "Card expired."
             elif any(x in err_msg for x in ["incorrect number", "your card is incorrect", "invalid number"]):
@@ -1127,7 +1127,7 @@ class SiteAuthManager:
             elif "insufficient" in err_msg:
                 status, reason = "INSUFFICIENT_FUNDS", "Insufficient funds"
             elif "does not support" in err_msg or "unsupported" in err_msg:
-                status, reason = "CVV", "Does not support purchase type"
+                status, reason = "APPROVED", "Does not support purchase type"
             elif "incorrect" in err_msg:
                 status, reason = "DECLINED", "Card number incorrect"
             elif "site_error" in err_msg or "no response" in err_msg:
@@ -1168,7 +1168,7 @@ def normalize_result(status_raw: str, err_msg: str = ""):
     elif any(x in err_lower for x in ["security", "cvc", "cvv", "invalid cvc", "incorrect cvc"]):
         status = "CCN"
     elif any(x in err_lower for x in ["does not support", "unsupported", "not supported"]):
-        status = "CVV"
+        status = "APPROVED"
     elif any(x in err_lower for x in ["incorrect number", "card number is incorrect", "your card is incorrect", "invalid number"]):
         status = "DECLINED"
         err_msg = "Your card number is incorrect"
@@ -1178,6 +1178,7 @@ def normalize_result(status_raw: str, err_msg: str = ""):
 
     mapping = {
         "CARD ADDED": ("Approved ✅", "CARD ADDED", "Auth success🔥", "✅"),
+        "APPROVED": ("Approved ✅", "APPROVED", err_msg or "Approved.", "✅"),
         "INSUFFICIENT_FUNDS": ("Insufficient Funds 💵", "INSUF_FUNDS", "Insufficient funds.", "💵"),
         "CCN": ("CCN 🔥", "CCN", "Your card security is incorrect.", "🔥"),
         "CVV": ("CVV ⚠️", "CVV", "Your card does not support this type of purchase.", "⚠️"),
@@ -1289,7 +1290,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None):
                 status = result.get("status", "").upper()
                 if status in [
                     "CARD ADDED", "PAYMENT_ADDED", "CCN", "INSUFFICIENT_FUNDS",
-                    "CVV", "3DS_REQUIRED", "DOES_NOT_SUPPORT", "UNSUPPORTED_GATEWAY"
+                    "APPROVED", "CVV", "3DS_REQUIRED", "DOES_NOT_SUPPORT", "UNSUPPORTED_GATEWAY"
                 ]:
                     return site_url, result
 
