@@ -122,6 +122,10 @@ WORKER_CARD_PAUSE = 2.0  # seconds delay between cards per worker
 LIVE_MESSAGE_GAP = 1.2   # minimal gap between live notifications globally (seconds)
 STOP_CHECK_INTERVAL = 0.2
 
+PROGRESS_INITIAL_UPDATES = (1, 5, 10)
+PROGRESS_UPDATE_INTERVAL = 10
+DECLINED_UPDATE_GAP = 5
+
 _live_send_lock = threading.Lock()
 _next_live_send = 0.0
 
@@ -618,6 +622,13 @@ def handle_file(bot, message, allowed_users):
             with user_futures_lock:
                 user_futures[chat_id] = []
 
+            last_board_update = {
+                "processed": 0,
+                "status": None,
+                "reason": None,
+                "declined": 0,
+            }
+
             # 🛑 Force cancel any unfinished tasks when stop is pressed
             def cancel_pending_futures():
                 with user_futures_lock:
@@ -866,13 +877,6 @@ def handle_file(bot, message, allowed_users):
                             save_live_cc_to_json(chat_id, worker_id, live_entry)
 
                         # -----------------------------------------
-                        # Update counters safely
-                        # -----------------------------------------
-                        with progress_lock:
-                            counters["total_processed"] += 1
-                            counters[count_as] += 1
-
-                        # -----------------------------------------
                         # 💬 BUILD RESULT MESSAGE (user output)
                         # -----------------------------------------
                         if send_message:
@@ -998,7 +1002,12 @@ def handle_file(bot, message, allowed_users):
                         # -----------------------------------------
                         # 🔁 UPDATE PROGRESS BOARD
                         # -----------------------------------------
+                        should_update_board = False
+                        short_reason = message_text
                         with progress_lock:
+                            counters["total_processed"] += 1
+                            counters[count_as] += 1
+
                             processed = counters["total_processed"]
                             total_cards = counters["total_cards"]
                             cvv = counters["cvv"]
@@ -1006,8 +1015,7 @@ def handle_file(bot, message, allowed_users):
                             threed = counters["threed"]
                             low = counters["low"]
                             declined = counters["declined"]
-                            # ✅ Shorter reason display
-                            # ✅ Shorter reason display for progress summary
+
                             msg_lower = message_text.lower()
                             if any(x in msg_lower for x in ["card number is incorrect", "your card is incorrect", "incorrect number"]):
                                 short_reason = "Your card number is incorrect"
@@ -1028,29 +1036,51 @@ def handle_file(bot, message, allowed_users):
                             else:
                                 short_reason = message_text
 
+                            processed_since_last = processed - last_board_update["processed"]
+                            declined_since_last = declined - last_board_update["declined"]
+                            is_declined_status = top_status.strip().upper().startswith("DECLINED")
 
+                            if processed in PROGRESS_INITIAL_UPDATES:
+                                should_update_board = True
+                            elif processed % PROGRESS_UPDATE_INTERVAL == 0 and processed != last_board_update["processed"]:
+                                should_update_board = True
+                            elif processed_since_last >= PROGRESS_UPDATE_INTERVAL:
+                                should_update_board = True
+                            elif processed == total_cards:
+                                should_update_board = True
+                            elif not is_declined_status:
+                                should_update_board = True
+                            elif is_declined_status and declined_since_last >= DECLINED_UPDATE_GAP:
+                                should_update_board = True
 
-                                                        
+                            if should_update_board:
+                                last_board_update.update({
+                                    "processed": processed,
+                                    "status": top_status,
+                                    "reason": short_reason,
+                                    "declined": declined,
+                                })
 
-                        checking = not is_stop_requested(chat_id)
-                        status_text = f"Processing {processed}/{total_cards} cards..."
-                        kb = build_status_keyboard(
-                            card, total_cards, processed, top_status,
-                            cvv, ccn, threed, low, declined,
-                            checking, chat_id,
-                            reason=short_reason
-                        )
-
-                        try:
-                            bot.edit_message_text(
-                                chat_id=reply_msg.chat.id,
-                                message_id=reply_msg.message_id,
-                                text=status_text,
-                                reply_markup=kb,
+                        if should_update_board:
+                            checking = not is_stop_requested(chat_id)
+                            status_text = f"Processing {processed}/{total_cards} cards..."
+                            kb = build_status_keyboard(
+                                card, total_cards, processed, top_status,
+                                cvv, ccn, threed, low, declined,
+                                checking, chat_id,
+                                reason=short_reason
                             )
-                        except Exception as e:
-                            if "message is not modified" not in str(e).lower():
-                                logger.info(f"[PROGRESS BOARD ERROR] {e}")
+
+                            try:
+                                bot.edit_message_text(
+                                    chat_id=reply_msg.chat.id,
+                                    message_id=reply_msg.message_id,
+                                    text=status_text,
+                                    reply_markup=kb,
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e).lower():
+                                    logger.info(f"[PROGRESS BOARD ERROR] {e}")
 
                         # -----------------------------------------
                         # 🕒 Silent cooldown every 5 cards (no visible pause)
