@@ -281,25 +281,15 @@ def start_busy_watchdog(bot, timeout: int = BUSY_TIMEOUT_SECONDS, interval: int 
                 label = info.get("label", "unknown")
                 logging.warning(f"[BUSY WATCHDOG] Clearing stale '{label}' session for user {chat_id}")
                 if label == "mass":
-                    try:
-                        set_stop_event(chat_id)
-                    except Exception:
-                        logging.exception(f"[BUSY WATCHDOG] Failed to stop mass check for {chat_id}")
-                    safe_send(
-                        bot,
-                        "send_message",
-                        chat_id,
-                        "⚠️ Your mass check took too long and was reset. Please start again.",
-                        parse_mode="HTML",
-                    )
-                else:
-                    safe_send(
-                        bot,
-                        "send_message",
-                        chat_id,
-                        "⚠️ Your previous check timed out and has been reset. Please try again.",
-                        parse_mode="HTML",
-                    )
+                    logging.info(f"[BUSY WATCHDOG] Mass check for {chat_id} exceeded timeout; skipping auto-stop per configuration.")
+                    continue
+                safe_send(
+                    bot,
+                    "send_message",
+                    chat_id,
+                    "⚠️ Your previous check timed out and has been reset. Please try again.",
+                    parse_mode="HTML",
+                )
                 clear_user_busy(chat_id)
 
     threading.Thread(target=monitor, daemon=True).start()
