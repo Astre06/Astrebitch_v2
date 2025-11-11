@@ -10,7 +10,7 @@ from html import escape
 import shutil
 import glob
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from shared_state import (
     is_user_busy,
     set_user_busy,
@@ -119,8 +119,9 @@ stop_events_lock = threading.Lock()
 activechecks = {}  # {user_id: Thread}
 activechecks_lock = threading.Lock()
 
-WORKER_CARD_PAUSE = 2.0  # seconds delay between cards per worker
-LIVE_MESSAGE_GAP = 1.2   # minimal gap between live notifications globally (seconds)
+WORKER_CARD_PAUSE = 0.35  # seconds delay between cards per worker (tuned for speed)
+LIVE_MESSAGE_GAP_DEFAULT = 1.0   # per-target minimal gap for live notifications (seconds)
+LIVE_MESSAGE_GAP_CHANNEL = 1.2   # slightly higher gap when posting to channel broadcasts
 STOP_CHECK_INTERVAL = 0.2
 
 PROGRESS_INITIAL_UPDATES = (1, 5, 10)
@@ -128,7 +129,29 @@ PROGRESS_UPDATE_INTERVAL = 10
 DECLINED_UPDATE_GAP = 5
 
 _live_send_lock = threading.Lock()
-_next_live_send = 0.0
+_live_send_schedule = {}       # target_id -> next allowable send timestamp
+_last_live_scheduled = {}      # target_id -> last scheduled send timestamp
+
+
+def _get_live_gap_for_target(target_id) -> float:
+    """Return the delay gap for a given notification target."""
+    if str(target_id) == str(CHANNEL_ID):
+        return LIVE_MESSAGE_GAP_CHANNEL
+    return LIVE_MESSAGE_GAP_DEFAULT
+
+
+def _cleanup_live_schedule_locked(now: float):
+    """
+    Remove stale scheduling entries; expects _live_send_lock to be held.
+    Keeps dicts small once their scheduled times are far in the past.
+    """
+    expired_targets = [
+        target for target, next_available in list(_live_send_schedule.items())
+        if next_available + 2.0 < now
+    ]
+    for target in expired_targets:
+        _live_send_schedule.pop(target, None)
+        _last_live_scheduled.pop(target, None)
 
 
 def is_mass_check_active(chat_id: str) -> bool:
@@ -184,16 +207,20 @@ def sleep_with_stop(chat_id: str, seconds: float, check_interval: float = STOP_C
 
 def queue_live_notification(bot, target_id: str, text: str, *, base_delay: float = 0.0, **kwargs) -> float:
     """
-    Schedule a live notification through the dispatcher with global spacing to avoid flood control.
+    Schedule a live notification through the dispatcher with per-target spacing to avoid flood control.
     Returns the effective delay (seconds) applied before sending.
     """
-    global _next_live_send
+    target_key = str(target_id)
+    target_gap = _get_live_gap_for_target(target_key)
     with _live_send_lock:
         now = time.time()
-        earliest = max(now, _next_live_send)
+        next_available = _live_send_schedule.get(target_key, now)
+        earliest = max(now, next_available)
         scheduled = earliest + max(base_delay, 0.0)
         effective_delay = max(0.0, scheduled - now)
-        _next_live_send = scheduled + LIVE_MESSAGE_GAP
+        _last_live_scheduled[target_key] = scheduled
+        _live_send_schedule[target_key] = scheduled + target_gap
+        _cleanup_live_schedule_locked(now)
     safe_send_message(
         bot,
         target_id,
@@ -204,7 +231,7 @@ def queue_live_notification(bot, target_id: str, text: str, *, base_delay: float
     return effective_delay
 
 
-def wait_for_live_queue_flush(pending_live: int = 0, *, buffer: float = 0.4):
+def wait_for_live_queue_flush(pending_live: int = 0, *, buffer: float = 0.4, targets: tuple[str, ...] | None = None):
     """
     Best-effort wait until all queued live notifications finish sending.
     Sleeps until the last scheduled live send time has passed, then blocks on the
@@ -214,7 +241,19 @@ def wait_for_live_queue_flush(pending_live: int = 0, *, buffer: float = 0.4):
         return
 
     with _live_send_lock:
-        last_scheduled = _next_live_send - LIVE_MESSAGE_GAP
+        if targets:
+            relevant_times = [
+                _last_live_scheduled.get(str(target))
+                for target in targets
+                if _last_live_scheduled.get(str(target)) is not None
+            ]
+        else:
+            relevant_times = list(_last_live_scheduled.values())
+
+        last_scheduled = max(relevant_times) if relevant_times else None
+
+    if last_scheduled is None:
+        return
 
     remaining = last_scheduled - time.time()
     if remaining > 0:
@@ -775,10 +814,11 @@ def _handle_file_impl(bot, message, allowed_users):
                     raise StopMassCheckException()
 
                 elapsed = time.time() - start_time
+                finished_at = datetime.now(timezone.utc)
                 logger.info(f"[MassCheck] {card[:6]}**** processed in {elapsed:.2f}s → {result.get('status')}")
                 if sleep_with_stop(chat_id, WORKER_CARD_PAUSE):
                     raise StopMassCheckException()
-                return (card, result_site, result, elapsed)
+                return (card, result_site, result, elapsed, finished_at)
 
             # ----------------------------------------------------
             # QUEUE ALL CARDS
@@ -810,7 +850,7 @@ def _handle_file_impl(bot, message, allowed_users):
                         if not card_result:
                             continue
 
-                        card, result_site, result, elapsed = card_result
+                        card, result_site, result, elapsed, finished_at = card_result
                         termination_message = "All your sites have died during checking. Please add new ones."
 
                         if not all_sites_dead_announced.is_set():
@@ -832,6 +872,7 @@ def _handle_file_impl(bot, message, allowed_users):
                                 break
                         status = result.get("status", "DECLINED")
                         message_text = result.get("message", result.get("reason", "Unknown response."))
+                        checked_at_text = finished_at.strftime("%Y-%m-%d %H:%M:%S UTC")
 
                         # 🧩 Clarify declined reasons for mass check inline board
                         if status.upper() == "DECLINED":
@@ -929,7 +970,8 @@ def _handle_file_impl(bot, message, allowed_users):
                                 "bank": result.get("bank", ""),
                                 "country": result.get("country", ""),
                                 "proxy": result.get("_used_proxy", False),
-                                "message": message_text
+                                "message": message_text,
+                                "checked_at": checked_at_text,
                             }
                             save_live_cc_to_json(chat_id, worker_id, live_entry)
 
@@ -993,7 +1035,8 @@ def _handle_file_impl(bot, message, allowed_users):
                                     f"<code>✧ <b>Proxy:</b> {proxy_state}</code>"
                                     f"{f' <code>[{site_num}]</code>' if site_num else ''}\n"
                                     f"<code>✧ <b>Checked by:</b></code><code>{escape(username_display)}</code> <code>[</code><code>{chat_id}</code><code>]</code>\n"
-                                    f"<code>✧ <b>Time:</b> {elapsed:.2f}s ⏳</code>\n"
+                                    f"<code>✧ <b>Duration:</b> {elapsed:.2f}s ⏳</code>\n"
+                                    f"<code>✧ <b>Checked At:</b> {checked_at_text}</code>\n"
                                     f"━━━━━━━━━━━━━━━━━━\n"
                                 )
 
@@ -1010,7 +1053,9 @@ def _handle_file_impl(bot, message, allowed_users):
                                         "brand": brand,
                                         "bank": bank,
                                         "country": country,
-                                        "proxy": proxy_state
+                                        "proxy": proxy_state,
+                                        "checked_at": checked_at_text,
+                                        "duration": elapsed,
                                     })
                                     save_live_cc_to_json(chat_id, worker_id, {
                                         "cc": card,
@@ -1020,7 +1065,9 @@ def _handle_file_impl(bot, message, allowed_users):
                                         "brand": brand,
                                         "bank": bank,
                                         "country": country,
-                                        "proxy": proxy_state
+                                        "proxy": proxy_state,
+                                        "checked_at": checked_at_text,
+                                        "duration": elapsed,
                                     })
 
                                     if idx % 5000 == 0:
@@ -1140,14 +1187,14 @@ def _handle_file_impl(bot, message, allowed_users):
                                     logger.info(f"[PROGRESS BOARD ERROR] {e}")
 
                         # -----------------------------------------
-                        # 🕒 Silent cooldown every 5 cards (no visible pause)
+                        # 🕒 Lightweight cooldown every 20 cards (maintains responsiveness)
                         # -----------------------------------------
-                        if idx % 5 == 0 and not is_stop_requested(chat_id):
-                            if sleep_with_stop(chat_id, 1.0):
+                        if idx % 20 == 0 and not is_stop_requested(chat_id):
+                            if sleep_with_stop(chat_id, 0.15):
                                 raise StopMassCheckException()
 
-                        # Small per-card delay to reduce flood risk
-                        if sleep_with_stop(chat_id, 0.3):
+                        # Micro pause per card to keep stop checks snappy
+                        if sleep_with_stop(chat_id, 0.05):
                             raise StopMassCheckException()
 
                     # end try (per future)
@@ -1191,7 +1238,7 @@ def _handle_file_impl(bot, message, allowed_users):
                 cancel_pending_futures()
 
                 if live_count > 0:
-                    wait_for_live_queue_flush(live_count)
+                    wait_for_live_queue_flush(live_count, targets=(chat_id, CHANNEL_ID))
 
 
                 summary = (
@@ -1299,7 +1346,7 @@ def _handle_file_impl(bot, message, allowed_users):
 
             # Send results file
             if live_count > 0:
-                wait_for_live_queue_flush(live_count)
+                wait_for_live_queue_flush(live_count, targets=(chat_id, CHANNEL_ID))
                 try:
                     bot.send_message(chat_id, summary, parse_mode="HTML")
                 except Exception:
