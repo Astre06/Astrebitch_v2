@@ -1008,10 +1008,34 @@ class SiteAuthManager:
 
         # ✅ Process site result
         # ✅ Process site result
-        if site_json.get("success"):
+        site_requires_action = False
+        site_data = site_json.get("data")
+        if isinstance(site_data, dict):
+            status_value = str(site_data.get("status", "")).lower()
+            next_action_type = str(site_data.get("next_action", {}).get("type", "")).lower() if isinstance(site_data.get("next_action"), dict) else ""
+            site_requires_action = (
+                status_value in ("requires_action", "requires authentication", "authentication_required")
+                or "requires_action" in status_value
+                or "requires_action" in next_action_type
+                or "use_stripe_sdk" in next_action_type
+            )
+        elif isinstance(site_data, str):
+            site_requires_action = "requires_action" in site_data.lower() or "requires action" in site_data.lower()
+
+        if not site_requires_action:
+            # check top-level messages for requires_action even if data missing
+            site_json_str = json.dumps(site_json).lower()
+            if "requires_action" in site_json_str or "requires action" in site_json_str:
+                site_requires_action = True
+
+        if site_json.get("success") and not site_requires_action:
             print("[RESULT] ✅ Card added successfully (Site).")
             status = "CARD ADDED"
             reason = "Auth success🔥"
+        elif site_requires_action:
+            print("[RESULT] ⚠️ Site requires additional authentication (3DS).")
+            status = "3DS_REQUIRED"
+            reason = "Requires 3DS authentication."
         else:
             err_msg = (
                 site_json.get("data", {}).get("error", {}).get("message")
@@ -1048,6 +1072,7 @@ class SiteAuthManager:
             "top_status": normalized["top_status"],
             "display_status": normalized["display_status"],
             "message": normalized["message"],
+            "reason": normalized["message"],
             "emoji": normalized["emoji"],
             "stripe": stripe_json,
             "site": site_json,
@@ -1136,7 +1161,7 @@ def normalize_result(status_raw: str, err_msg: str = ""):
     status = (status_raw or "").upper().strip()
     err_lower = (err_msg or "").lower()
 
-    if any(x in err_lower for x in ["requires_action", "3ds", "authentication required"]):
+    if any(x in err_lower for x in ["requires_action", "requires action", "3ds", "authentication required"]):
         status = "3DS_REQUIRED"
     elif any(x in err_lower for x in ["insufficient", "low balance", "not enough funds"]):
         status = "INSUFFICIENT_FUNDS"
