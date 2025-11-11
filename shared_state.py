@@ -131,8 +131,14 @@ def save_live_cc_to_json(user_id: str, worker_id: int, live_data: dict):
 # ================================================================
 # 🔁 Shared Function — Retry logic for site checks (Manual + Mass)
 # ================================================================
-def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None, max_tries=None):
+def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None, max_tries=None, stop_checker=None):
     from site_auth_manager import remove_user_site, _load_state, process_card_for_user_sites
+
+    def should_stop() -> bool:
+        try:
+            return bool(stop_checker and stop_checker())
+        except Exception:
+            return False
 
     # 🧩 Load once at start, cache sites in memory
     try:
@@ -140,6 +146,9 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
         user_sites = list(state.get(str(chat_id), {}).get("sites", {}).keys())
     except Exception:
         user_sites = []
+
+    if should_stop():
+        return None, {"status": "STOPPED", "reason": "User requested stop"}
 
     if not user_sites:
         return None, {"status": "DECLINED", "reason": "No sites configured", "site_dead": True}
@@ -168,6 +177,9 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
         return keyword_match
 
     while sites_queue and attempts < max_attempts:
+        if should_stop():
+            return None, {"status": "STOPPED", "reason": "User requested stop"}
+
         current_site = sites_queue[0]
         site_retry_counts[current_site] += 1
         attempts += 1
@@ -180,10 +192,14 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
             proxy=user_proxy,
             worker_id=worker_id,
             preferred_site=current_site,
+            stop_checker=stop_checker,
         )
 
         if not isinstance(result, dict):
             result = {"status": "DECLINED", "reason": str(result or "Invalid result")}
+
+        if result.get("status") == "STOPPED":
+            return site_url, result
 
         reason_text = result.get("reason") or result.get("message") or ""
         last_failure_reason = reason_text
@@ -223,6 +239,9 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
             "dead_sites_removed": confirmed_dead_sites,
             "last_failure_reason": last_failure_reason,
         }
+
+    if should_stop():
+        return last_site_used, {"status": "STOPPED", "reason": "User requested stop"}
 
     # ✅ Annotate result with removal metadata for callers
     if isinstance(result, dict):

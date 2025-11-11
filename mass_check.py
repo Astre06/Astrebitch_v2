@@ -5,7 +5,7 @@ import time
 import logging
 import threading
 from telebot import types
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, CancelledError
 from html import escape
 import shutil
 import glob
@@ -51,12 +51,13 @@ def set_dispatcher(dispatcher):
     _dispatcher = dispatcher
 
 
-def safe_send_message(bot, target_id, text, **kwargs):
+def safe_send_message(bot, target_id, text, *, delay: float = 0.0, **kwargs):
     """Send Telegram message safely, respecting flood limits."""
     if _dispatcher:
-        _dispatcher.enqueue("send_message", target_id, text, **kwargs)
+        _dispatcher.enqueue("send_message", target_id, text, delay=delay, **kwargs)
         return
-
+    if delay > 0:
+        time.sleep(delay)
     import logging
     while True:
         try:
@@ -116,6 +117,53 @@ outfile_lock = threading.Lock()
 stop_events = {}
 stop_events_lock = threading.Lock()
 activechecks = {}  # {user_id: Thread}
+
+WORKER_CARD_PAUSE = 2.0  # seconds delay between cards per worker
+LIVE_MESSAGE_GAP = 1.2   # minimal gap between live notifications globally (seconds)
+STOP_CHECK_INTERVAL = 0.2
+
+_live_send_lock = threading.Lock()
+_next_live_send = 0.0
+
+
+def sleep_with_stop(chat_id: str, seconds: float, check_interval: float = STOP_CHECK_INTERVAL) -> bool:
+    """
+    Sleep in small intervals while honoring stop requests.
+    Returns True if a stop was detected during the wait.
+    """
+    if seconds <= 0:
+        return False
+    end_time = time.time() + seconds
+    while True:
+        if is_stop_requested(chat_id):
+            return True
+        remaining = end_time - time.time()
+        if remaining <= 0:
+            return False
+        time.sleep(min(check_interval, remaining))
+
+
+def queue_live_notification(bot, target_id: str, text: str, *, base_delay: float = 0.0, **kwargs) -> float:
+    """
+    Schedule a live notification through the dispatcher with global spacing to avoid flood control.
+    Returns the effective delay (seconds) applied before sending.
+    """
+    global _next_live_send
+    with _live_send_lock:
+        now = time.time()
+        earliest = max(now, _next_live_send)
+        scheduled = earliest + max(base_delay, 0.0)
+        effective_delay = max(0.0, scheduled - now)
+        _next_live_send = scheduled + LIVE_MESSAGE_GAP
+    safe_send_message(
+        bot,
+        target_id,
+        text,
+        delay=effective_delay,
+        **kwargs,
+    )
+    return effective_delay
+
 
 # ================================================================
 # ⚠️ EXCEPTIONS
@@ -555,7 +603,8 @@ def handle_file(bot, message, allowed_users):
             # 🧭 Watchdog thread – cancels all workers instantly when STOP is pressed
             def monitor_stop():
                 while not is_stop_requested(chat_id):
-                    time.sleep(1)
+                    if sleep_with_stop(chat_id, STOP_CHECK_INTERVAL):
+                        break
                 try:
                     logger.warning(f"[WATCHDOG] Stop detected — shutting down executor for {chat_id}")
                     executor.shutdown(wait=False, cancel_futures=True)
@@ -602,8 +651,12 @@ def handle_file(bot, message, allowed_users):
                         card,
                         chat_id,
                         user_proxy=user_proxy,
-                        worker_id=worker_id
+                        worker_id=worker_id,
+                        stop_checker=lambda: is_stop_requested(chat_id),
                     )
+
+                    if isinstance(result, dict) and result.get("status") == "STOPPED":
+                        raise StopMassCheckException()
 
                     # 🧠 After retries: recheck if user has any live sites left
                     try:
@@ -655,6 +708,8 @@ def handle_file(bot, message, allowed_users):
 
                 elapsed = time.time() - start_time
                 logger.info(f"[MassCheck] {card[:6]}**** processed in {elapsed:.2f}s → {result.get('status')}")
+                if sleep_with_stop(chat_id, WORKER_CARD_PAUSE):
+                    raise StopMassCheckException()
                 return (card, result_site, result, elapsed)
 
             # ----------------------------------------------------
@@ -681,7 +736,9 @@ def handle_file(bot, message, allowed_users):
                         break
 
                     try:
-                        card_result = future.result(timeout=45)
+                        if future.cancelled():
+                            continue
+                        card_result = future.result()
                         if not card_result:
                             continue
 
@@ -880,6 +937,9 @@ def handle_file(bot, message, allowed_users):
                                 )
 
                                 # Save & send live message
+                                if sleep_with_stop(chat_id, 0.05):
+                                    raise StopMassCheckException()
+
                                 with outfile_lock:
                                     live_cc_results.append({
                                         "cc": card,
@@ -902,31 +962,36 @@ def handle_file(bot, message, allowed_users):
                                         "proxy": proxy_state
                                     })
 
-                                    time.sleep(0.05)
-                                    if idx % 5000 == 0:  # every 50 cards checked
-                                        cleanup_user_json(chat_id)                                
-                                        
+                                    if idx % 5000 == 0:
+                                        cleanup_user_json(chat_id)
+
                                     outfile.write(detail_msg + "\n")
                                     outfile.flush()
-                                    # 🕒 Send with a 2-second gap to avoid flood limits
-                                    safe_send_message(
-                                        bot, chat_id, detail_msg,
+
+                                if is_stop_requested(chat_id):
+                                    raise StopMassCheckException()
+
+                                try:
+                                    queue_live_notification(
+                                        bot,
+                                        chat_id,
+                                        detail_msg,
                                         parse_mode="HTML",
-                                        disable_web_page_preview=True
+                                        disable_web_page_preview=True,
                                     )
-                                    time.sleep(2)  # delay between messages
+                                except Exception as e:
+                                    logger.warning(f"[LIVE RESULT ERROR] Failed to queue user message: {e}")
 
-                                    # Also forward to channel (optional)
-                                    try:
-                                        safe_send_message(
-                                            bot, CHANNEL_ID, detail_msg,
-                                            parse_mode="HTML",
-                                            disable_web_page_preview=True
-                                        )
-                                        time.sleep(2)  # delay before next message too
-                                    except Exception as e:
-                                        logger.warning(f"[CHANNEL LIVE SEND ERROR] {e}")
-
+                                try:
+                                    queue_live_notification(
+                                        bot,
+                                        CHANNEL_ID,
+                                        detail_msg,
+                                        parse_mode="HTML",
+                                        disable_web_page_preview=True,
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"[CHANNEL LIVE SEND ERROR] {e}")
 
                             except Exception as e:
                                 logger.warning(f"[LIVE RESULT ERROR] {e}")
@@ -991,16 +1056,16 @@ def handle_file(bot, message, allowed_users):
                         # 🕒 Silent cooldown every 5 cards (no visible pause)
                         # -----------------------------------------
                         if idx % 5 == 0 and not is_stop_requested(chat_id):
-                            pause_time = 1  # seconds of cooldown
-                            for _ in range(pause_time):
-                                if is_stop_requested(chat_id):
-                                    raise StopMassCheckException()
-                                time.sleep(1)  # silent delay, no UI updates
+                            if sleep_with_stop(chat_id, 1.0):
+                                raise StopMassCheckException()
 
                         # Small per-card delay to reduce flood risk
-                        time.sleep(0.3)
+                        if sleep_with_stop(chat_id, 0.3):
+                            raise StopMassCheckException()
 
                     # end try (per future)
+                    except CancelledError:
+                        continue
                     except StopMassCheckException:
                         logger.info(f"[MassCheck] Stop requested for {chat_id}")
                         break
@@ -1075,7 +1140,7 @@ def handle_file(bot, message, allowed_users):
 
                     # 🕐 Wait before deleting raw result files
                     logger.info(f"[STOP CLEANUP] Waiting 5s before deleting raw files for {chat_id}")
-                    time.sleep(1)
+                    sleep_with_stop(chat_id, 1.0)
 
                     try:
                         cleanup_all_raw_files(chat_id)
@@ -1185,7 +1250,7 @@ def handle_file(bot, message, allowed_users):
         # ============================================================
         try:
             # ⏳ Wait briefly to ensure all threads and file handles are fully released
-            time.sleep(1.5)
+            sleep_with_stop(chat_id, 1.5)
 
             # 🔒 Explicitly close all file handles to avoid Windows "in use" error
             for obj in globals().values():
@@ -1199,7 +1264,7 @@ def handle_file(bot, message, allowed_users):
             cleanup_user_file(chat_id)
 
             # 🧹 Delay raw result cleanup to ensure outfile handle fully closed
-            time.sleep(0.5)
+            sleep_with_stop(chat_id, 0.5)
             cleanup_all_raw_files(chat_id)
             clear_user_busy(chat_id)
             activechecks.pop(chat_id, None)

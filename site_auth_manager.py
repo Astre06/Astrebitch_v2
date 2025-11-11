@@ -1268,21 +1268,31 @@ def normalize_result(status_raw: str, err_msg: str = ""):
 # ==========================================================
 # PROCESS CARD FOR USER SITES (Auto-default site if missing)
 # ==========================================================
-def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, preferred_site=None):
+def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, preferred_site=None, stop_checker=None):
     from mass_check import is_stop_requested
 
     # 🛑 Stop check before anything starts
-    if is_stop_requested(str(chat_id)):
+    chat_id = str(chat_id)
+
+    def _should_stop() -> bool:
+        if stop_checker:
+            try:
+                if stop_checker():
+                    return True
+            except Exception:
+                pass
+        return is_stop_requested(chat_id)
+
+    if _should_stop():
         print(f"[PROCESS STOP] User {chat_id} requested stop before processing card.")
         return None, {"status": "STOPPED", "reason": "User requested stop"}
 
     state = _load_state(chat_id)
-    chat_id = str(chat_id)
     user_sites = list(state.get(chat_id, {}).get("sites", {}).keys())
 
     # ✅ AUTO-ADD default site for new users (no sites.json entry)
     if not user_sites:
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before auto-site setup.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1314,7 +1324,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # =======================================================
     if preferred_site:
         target_site = preferred_site
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before forced site processing.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1330,7 +1340,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # MODE: ROTATE  (random + round robin)
     # =======================================================
     if mode == "rotate":
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before rotate mode processing.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1353,20 +1363,20 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # MODE: ALL
     # =======================================================
     elif mode == "all":
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before all-sites loop.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
         result = None
         for site_url in user_sites:
-            if is_stop_requested(str(chat_id)):
+            if _should_stop():
                 print(f"[PROCESS STOP] User {chat_id} stopped mid-loop (site={site_url}).")
                 return None, {"status": "STOPPED", "reason": "User requested stop"}
 
             manager = SiteAuthManager(site_url, chat_id, proxy, worker_id=worker_id)
             result = manager.process_card(ccx)
 
-            if is_stop_requested(str(chat_id)):
+            if _should_stop():
                 print(f"[PROCESS STOP] User {chat_id} stopped after processing site {site_url}.")
                 return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1385,7 +1395,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
     # Fallback
     # =======================================================
     else:
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before fallback mode.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
@@ -1394,7 +1404,7 @@ def process_card_for_user_sites(ccx, chat_id, proxy=None, worker_id=None, prefer
         manager = SiteAuthManager(site_url, chat_id, proxy, worker_id=worker_id)
         result = manager.process_card(ccx)
 
-        if is_stop_requested(str(chat_id)):
+        if _should_stop():
             print(f"[PROCESS STOP] User {chat_id} stopped before returning fallback result.")
             return None, {"status": "STOPPED", "reason": "User requested stop"}
 
