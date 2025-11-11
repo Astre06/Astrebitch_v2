@@ -338,7 +338,7 @@ def process_manual_check(bot, message, allowed_users):
 
         elif any(word in raw_reason for word in ["support", "does not support", "unsupported"]):
             final_message_detail = "Your card does not support this type of purchase."
-            final_status = "CVV"
+            final_status = "APPROVED"
 
         elif "site" in raw_reason:
             final_message_detail = "Site response failed."
@@ -428,7 +428,12 @@ def process_manual_check(bot, message, allowed_users):
         # ============================================================
         msg_lower = final_message_detail.lower()
 
-        if any(x in msg_lower for x in ["auth success", "card added", "approved", "payment added"]):
+        unsupported_purchase = final_message_detail.strip().lower() == "your card does not support this type of purchase."
+
+        if final_status == "APPROVED" or unsupported_purchase:
+            top_status = "Approved ✅"
+            emoji = "✅"
+        elif any(x in msg_lower for x in ["auth success", "card added", "approved", "payment added"]):
             top_status = "Approved ✅"
             final_status = "APPROVED"
             emoji = "✅"

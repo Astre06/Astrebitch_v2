@@ -716,6 +716,7 @@ def handle_file(bot, message, allowed_users):
 
                         emoji_map = {
                             "CCN": "🔥",
+                            "APPROVED": "✅",
                             "DECLINED": " ",
                             "PAYMENT_ADDED": "✅",
                             "CARD ADDED": "✅",
@@ -734,7 +735,9 @@ def handle_file(bot, message, allowed_users):
                             top_status, count_as, send_message = "Declined ❌", "declined", False
 
                         elif any(x in msg_lower for x in ["does not support", "unsupported", "not supported"]):
-                            top_status, count_as, send_message = "CVV ⚠️", "cvv", True
+                            top_status, count_as, send_message = "Approved ✅", "cvv", True
+                            status = "APPROVED"
+                            emoji = "✅"
 
                         elif any(x in msg_lower for x in ["requires_action", "3ds", "authentication required"]):
                             top_status, count_as, send_message = "3DS", "threed", True
