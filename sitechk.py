@@ -10,6 +10,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import CHANNEL_ID
+from woo_helpers import build_registration_payload, is_logged_in
 # --- CONFIG (no Telegram token needed) ---
 DEFAULT_CARD = "4848100094874662|08|2029|337"
 
@@ -84,25 +85,46 @@ def analyze_site_page(text: str) -> dict:
     }
 def register_new_account(register_url: str, session: requests.Session = None):
     """
-    Register a random account on the WooCommerce site by POSTing directly to /my-account/.
-    Simplified flow that mirrors proven working logic in production bot.
-    Returns a session with cookies when successful.
+    Register a random account on the WooCommerce site.
+    This version loads the registration page first so we can include dynamic nonce fields.
+    Returns an authenticated session when successful, otherwise None.
     """
     sess = session or requests.Session()
     user_agent = get_random_user_agent()
-    headers = {
-        "User-Agent": user_agent,
-        "Referer": register_url,
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
+    sess.headers.update({"User-Agent": user_agent})
+
+    try:
+        register_page = sess.get(
+            register_url,
+            headers={"User-Agent": user_agent, "Referer": register_url},
+            timeout=15,
+            allow_redirects=True,
+        )
+    except Exception as exc:
+        logger.error(f"Registration page request failed: {exc}")
+        return None
+
+    if register_page.status_code >= 400:
+        logger.warning(
+            f"Registration page responded with {register_page.status_code} for {register_url}"
+        )
+        return None
+
     email = generate_random_email()
     username = generate_random_username()
     password = generate_random_string(12)
 
-    payload = {
-        "email": email,
-        "username": username,
-        "password": password,
+    payload = build_registration_payload(
+        register_page.text,
+        email=email,
+        username=username,
+        password=password,
+    )
+
+    headers = {
+        "User-Agent": user_agent,
+        "Referer": register_url,
+        "Content-Type": "application/x-www-form-urlencoded",
     }
 
     try:
@@ -110,15 +132,36 @@ def register_new_account(register_url: str, session: requests.Session = None):
             register_url,
             headers=headers,
             data=payload,
-            timeout=15,
+            timeout=20,
             allow_redirects=True,
         )
-    except Exception as e:
-        logger.error(f"Registration request failed: {e}")
+    except Exception as exc:
+        logger.error(f"Registration request failed: {exc}")
         return None
 
     if resp.status_code not in (200, 302):
         logger.warning(f"Registration failed ({resp.status_code}) for {register_url}")
+        return None
+
+    response_html = resp.text
+    logged_in = is_logged_in(response_html)
+
+    if not logged_in:
+        try:
+            verify_resp = sess.get(
+                register_url,
+                headers={"User-Agent": user_agent},
+                timeout=15,
+                allow_redirects=True,
+            )
+        except Exception:
+            verify_resp = None
+
+        if verify_resp and verify_resp.status_code < 400:
+            logged_in = is_logged_in(verify_resp.text)
+
+    if not logged_in:
+        logger.warning("Registration response did not indicate a logged-in state.")
         return None
 
     logger.info(f"[+] Registered new account: {email} | {username}")
@@ -127,7 +170,6 @@ def register_new_account(register_url: str, session: requests.Session = None):
         "username": username,
         "password": password,
     }
-    sess.headers.update({"User-Agent": user_agent})
     return sess
 
 
