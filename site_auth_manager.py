@@ -86,6 +86,25 @@ def _get_user_site_file(chat_id):
 _save_lock = threading.Lock()
 
 
+def _normalize_site_key(site_url: str) -> str:
+    """
+    Normalize site URL to scheme://netloc without trailing slash.
+    Ensures consistent comparisons when adding/removing sites.
+    """
+    try:
+        site_url = (site_url or "").strip()
+        if not site_url:
+            return ""
+        if not site_url.startswith(("http://", "https://")):
+            site_url = f"https://{site_url}"
+        parsed = urlparse(site_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    except Exception:
+        pass
+    return site_url.rstrip("/")
+
+
 # ==========================================================
 # STATE HELPERS
 # ==========================================================
@@ -156,6 +175,9 @@ def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) 
     """
     try:
         chat_id = str(chat_id)
+        target = _normalize_site_key(site_url)
+        if not target:
+            return False
         state = _load_state(chat_id) or {}
         user_entry = state.get(chat_id)
         if not user_entry:
@@ -163,11 +185,23 @@ def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) 
 
         sites = user_entry.get("sites", {})
         removed = False
-        if site_url in sites:
-            del sites[site_url]
+        keys_to_remove = [
+            existing_key
+            for existing_key in list(sites.keys())
+            if _normalize_site_key(existing_key) == target
+        ]
+
+        if keys_to_remove:
+            for key in keys_to_remove:
+                del sites[key]
+            snapshot = user_entry.get("defaults_snapshot")
+            if isinstance(snapshot, list):
+                user_entry["defaults_snapshot"] = [
+                    snap for snap in snapshot if _normalize_site_key(snap) != target
+                ]
             _save_state(state, chat_id)
             removed = True
-            print(f"[REMOVE_SITE] Removed dead site for user {chat_id}: {site_url}")
+            print(f"[REMOVE_SITE] Removed dead site for user {chat_id}: {target}")
 
         # Also remove from worker-specific site files so the dead site cannot be reused.
         user_dir = os.path.join("sites", chat_id)
@@ -178,8 +212,19 @@ def remove_user_site(chat_id: str, site_url: str, worker_id: int | None = None) 
                     with open(path, "r", encoding="utf-8") as f:
                         worker_state = json.load(f)
                     worker_entry = worker_state.get(chat_id, {}).get("sites", {})
-                    if site_url in worker_entry:
-                        del worker_state[chat_id]["sites"][site_url]
+                    worker_keys_to_remove = [
+                        existing_key
+                        for existing_key in list(worker_entry.keys())
+                        if _normalize_site_key(existing_key) == target
+                    ]
+                    if worker_keys_to_remove:
+                        for key in worker_keys_to_remove:
+                            del worker_state[chat_id]["sites"][key]
+                        snapshot = worker_state.get(chat_id, {}).get("defaults_snapshot")
+                        if isinstance(snapshot, list):
+                            worker_state[chat_id]["defaults_snapshot"] = [
+                                snap for snap in snapshot if _normalize_site_key(snap) != target
+                            ]
                         with open(path, "w", encoding="utf-8") as f:
                             json.dump(worker_state, f, indent=2)
                         print(f"[REMOVE_SITE] Removed dead site from {os.path.basename(path)} for user {chat_id}")

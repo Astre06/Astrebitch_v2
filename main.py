@@ -81,6 +81,7 @@ from site_auth_manager import (
     SiteAuthManager,
     _load_state,
     _save_state,
+    _normalize_site_key,
     process_card_for_user_sites,
 )
 from dispatcher import MessageDispatcher
@@ -1798,11 +1799,28 @@ def sitelist(message):
         )
         return
 
-    runtime_defaults = [s.rstrip("/") for s in get_all_default_sites()]
+    ensure_user_site_exists(chat_id)
+
+    def unique_sites(values):
+        seen = set()
+        ordered = []
+        iterable = values or []
+        for raw in iterable:
+            normalized = _normalize_site_key(raw)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(normalized)
+        return ordered
+
+    runtime_defaults = unique_sites(get_all_default_sites())
     state = _load_state(chat_id)
     user_data = state.get(chat_id, {}) if state else {}
-    user_sites = [s.rstrip("/") for s in user_data.get("sites", {}).keys()]
-    defaults_snapshot = [s.rstrip("/") for s in user_data.get("defaults_snapshot", [])]
+    user_sites = unique_sites(user_data.get("sites", {}).keys())
+    defaults_snapshot = unique_sites(user_data.get("defaults_snapshot", []))
+    runtime_default_set = set(runtime_defaults)
+    user_site_set = set(user_sites)
+    defaults_snapshot_set = set(defaults_snapshot)
 
     # ADMIN LOGIC
     if is_admin:
@@ -1834,8 +1852,8 @@ def sitelist(message):
     else:
         if (
             not user_sites
-            or (defaults_snapshot and set(user_sites) == set(defaults_snapshot))
-            or (not defaults_snapshot and set(user_sites) == set(runtime_defaults))
+            or (defaults_snapshot_set and user_site_set == defaults_snapshot_set)
+            or (not defaults_snapshot_set and user_site_set == runtime_default_set)
         ):
             sent_msg = bot.send_message(
                 chat_id,
@@ -1847,7 +1865,7 @@ def sitelist(message):
             custom_sites = [
                 s
                 for s in user_sites
-                if s not in runtime_defaults and s not in defaults_snapshot
+                if s not in runtime_default_set and s not in defaults_snapshot_set
             ]
             if not custom_sites and user_sites:
                 custom_sites = user_sites
