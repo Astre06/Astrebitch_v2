@@ -719,7 +719,7 @@ def handle_file(bot, message, allowed_users):
                             "DECLINED": " ",
                             "PAYMENT_ADDED": "✅",
                             "CARD ADDED": "✅",
-                            "INSUFFICIENT_FUNDS": "😢",
+                            "INSUFFICIENT_FUNDS": "⚠️",
                             "CVV": "⚠️",
                             "3DS_REQUIRED": "⚠️"
                         }
@@ -740,7 +740,8 @@ def handle_file(bot, message, allowed_users):
                             top_status, count_as, send_message = "3DS", "threed", True
 
                         elif any(x in msg_lower for x in ["insufficient", "low balance", "not enough funds"]):
-                            top_status, count_as, send_message = "Insufficient Funds 💵", "low", True
+                            top_status, count_as, send_message = "LOW FUNDS", "low", True
+                            message_text = "Your card has insufficient funds."
 
                         elif any(x in msg_lower for x in [
                             "security", "cvc", "cvv", "invalid cvc", "incorrect cvc",
@@ -828,6 +829,8 @@ def handle_file(bot, message, allowed_users):
                                 status_display = f"{status}{emoji}".rstrip()
                                 if status == "3DS_REQUIRED":
                                     status_display = "⚠️ Requires Action"
+                                elif status == "INSUFFICIENT_FUNDS":
+                                    status_display = "⚠️ Insufficient Funds"
                                 detail_msg = (
                                     f"<code><b>{top_status}</b></code>\n"
                                     f"━━━━━━━━━━━━━━━━━━\n"
