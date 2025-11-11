@@ -37,6 +37,29 @@ class MessageDispatcher:
         self.enqueue("__shutdown__")
         self._worker.join(timeout=timeout)
 
+    def wait_until_idle(self, timeout: Optional[float] = None) -> bool:
+        """
+        Block until all queued tasks are processed or timeout occurs.
+        Returns True when the queue drained, False if timeout expired first.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        try:
+            with self._queue.all_tasks_done:
+                while self._queue.unfinished_tasks:
+                    remaining = None if deadline is None else deadline - time.monotonic()
+                    if remaining is not None and remaining <= 0:
+                        return False
+                    self._queue.all_tasks_done.wait(timeout=remaining)
+            return True
+        except AttributeError:
+            # Fallback for alternative Queue implementations lacking all_tasks_done
+            start = time.monotonic()
+            while self._queue.unfinished_tasks:
+                if timeout is not None and (time.monotonic() - start) >= timeout:
+                    return False
+                time.sleep(0.05)
+            return True
+
     # ------------------------------------------------------------------ #
     # Internal worker
     # ------------------------------------------------------------------ #
