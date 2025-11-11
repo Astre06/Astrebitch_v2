@@ -82,6 +82,20 @@ def country_to_flag(country_name: str) -> str:
 def process_manual_check(bot, message, allowed_users):
     start_time = time.perf_counter()
     chat_id = str(message.chat.id)
+
+    def _get_active_sites():
+        try:
+            state = _load_state(chat_id)
+            return state.get(str(chat_id), {}).get("sites", {})
+        except Exception:
+            return {}
+
+    def _has_active_sites():
+        return bool(_get_active_sites())
+
+    termination_message = "All your sites have died during checking. Please add new ones."
+    sites_depleted = False
+
     # 🚦 Prevent running if already busy
     if is_user_busy(chat_id):
         bot.send_message(chat_id, "⚠ You already have an active check running.")
@@ -237,6 +251,17 @@ def process_manual_check(bot, message, allowed_users):
             if not isinstance(result, dict):
                 result = {"status": "DECLINED", "reason": str(result or "Unknown error")}
 
+            sites_depleted = not _has_active_sites()
+
+            if sites_depleted:
+                site_url = None
+                result.setdefault("status", "DECLINED")
+                result["reason"] = termination_message
+                result["message"] = termination_message
+                result["top_status"] = "Declined ❌"
+                result["display_status"] = "DECLINED"
+                result["emoji"] = "❌"
+
             # ✅ Ensure proxy flag is always present
             if isinstance(result, dict):
                 if "_used_proxy" not in result:
@@ -267,7 +292,7 @@ def process_manual_check(bot, message, allowed_users):
         try:
             state = _load_state(chat_id)
             user_sites = list(state.get(str(chat_id), {}).keys())
-            if not user_sites:
+            if not user_sites and not sites_depleted:
                 user_sites = [DEFAULT_API_URL]
             if site_url in user_sites:
                 site_num = user_sites.index(site_url) + 1
@@ -283,78 +308,80 @@ def process_manual_check(bot, message, allowed_users):
         emoji = result.get("emoji", "❌")
 
         # Clarify failure reasons for manual check
-        # 🔎 Extract and normalize reason from result or Stripe/site data
-        raw_reason = str(
-            result.get("reason")
-            or result.get("raw_reason")
-            or result.get("message")
-            or result.get("stripe", {}).get("error", {}).get("message")
-            or ""
-        ).lower()
-
-        # ============================================================
-        # 🧠 Interpret decline / response reasons for readable message
-        # ============================================================
-        # Normalize Stripe prefixes like "stripe: your card is incorrect"
-        raw_reason = re.sub(r"(?i)^stripe:\s*", "", raw_reason).strip()
-
-        if any(word in raw_reason for word in ["requires_action", "3d", "3ds", "authentication_required", "authentication"]):
-            final_message_detail = "3D Secure authentication required."
-            final_status = "3DS_REQUIRED"
-
-        elif any(word in raw_reason for word in [
-            "incorrect_number", "card number is incorrect", "your card number is incorrect",
-            "your card is incorrect", "invalid number"
-        ]):
-            final_message_detail = "Your card number is incorrect."
-            final_status = "DECLINED"
-
-        elif any(word in raw_reason for word in [
-            "security", "cvc", "cvv", "invalid cvc", "invalid cvv",
-            "wrong cvc", "wrong cvv", "incorrect cvc", "incorrect cvv",
-            "security code incorrect", "your card security", "card security incorrect",
-            "invalid security", "check code", "cvc does not match", "cvv does not match"
-        ]):
-            final_message_detail = "Your card security is incorrect."
-            final_status = "CCN"
-
-        elif any(word in raw_reason for word in [
-            "insufficient", "not enough funds", "low balance",
-            "declined insufficient", "insufficient_funds"
-        ]):
-            final_message_detail = "Your card has insufficient funds."
-            final_status = "INSUFFICIENT_FUNDS"
-
-        elif any(word in raw_reason for word in [
-            "expired", "expiry", "expiration", "invalid expiry",
-            "invalid exp date", "card expired", "expired_card"
-        ]):
-            final_message_detail = "Expired card."
-            final_status = "DECLINED"
-
-        elif "pickup" in raw_reason or "stolen" in raw_reason:
-            final_message_detail = "Stolen or blocked card."
-            final_status = "DECLINED"
-
-        elif any(word in raw_reason for word in ["support", "does not support", "unsupported"]):
-            final_message_detail = "Your card does not support this type of purchase."
-            final_status = "APPROVED"
-
-        elif "site" in raw_reason:
-            final_message_detail = "Site response failed."
-            final_status = "DECLINED"
-
-        elif "stripe" in raw_reason and not "error" in raw_reason:
-            final_message_detail = "Stripe error occurred."
-            final_status = "DECLINED"
-
-        else:
-            final_message_detail = (
+        raw_reason = ""
+        if not sites_depleted:
+            # 🔎 Extract and normalize reason from result or Stripe/site data
+            raw_reason = str(
                 result.get("reason")
                 or result.get("raw_reason")
                 or result.get("message")
-                or "Your card was declined."
-            )
+                or result.get("stripe", {}).get("error", {}).get("message")
+                or ""
+            ).lower()
+
+            # ============================================================
+            # 🧠 Interpret decline / response reasons for readable message
+            # ============================================================
+            # Normalize Stripe prefixes like "stripe: your card is incorrect"
+            raw_reason = re.sub(r"(?i)^stripe:\s*", "", raw_reason).strip()
+
+            if any(word in raw_reason for word in ["requires_action", "3d", "3ds", "authentication_required", "authentication"]):
+                final_message_detail = "3D Secure authentication required."
+                final_status = "3DS_REQUIRED"
+
+            elif any(word in raw_reason for word in [
+                "incorrect_number", "card number is incorrect", "your card number is incorrect",
+                "your card is incorrect", "invalid number"
+            ]):
+                final_message_detail = "Your card number is incorrect."
+                final_status = "DECLINED"
+
+            elif any(word in raw_reason for word in [
+                "security", "cvc", "cvv", "invalid cvc", "invalid cvv",
+                "wrong cvc", "wrong cvv", "incorrect cvc", "incorrect cvv",
+                "security code incorrect", "your card security", "card security incorrect",
+                "invalid security", "check code", "cvc does not match", "cvv does not match"
+            ]):
+                final_message_detail = "Your card security is incorrect."
+                final_status = "CCN"
+
+            elif any(word in raw_reason for word in [
+                "insufficient", "not enough funds", "low balance",
+                "declined insufficient", "insufficient_funds"
+            ]):
+                final_message_detail = "Your card has insufficient funds."
+                final_status = "INSUFFICIENT_FUNDS"
+
+            elif any(word in raw_reason for word in [
+                "expired", "expiry", "expiration", "invalid expiry",
+                "invalid exp date", "card expired", "expired_card"
+            ]):
+                final_message_detail = "Expired card."
+                final_status = "DECLINED"
+
+            elif "pickup" in raw_reason or "stolen" in raw_reason:
+                final_message_detail = "Stolen or blocked card."
+                final_status = "DECLINED"
+
+            elif any(word in raw_reason for word in ["support", "does not support", "unsupported"]):
+                final_message_detail = "Your card does not support this type of purchase."
+                final_status = "APPROVED"
+
+            elif "site" in raw_reason:
+                final_message_detail = "Site response failed."
+                final_status = "DECLINED"
+
+            elif "stripe" in raw_reason and not "error" in raw_reason:
+                final_message_detail = "Stripe error occurred."
+                final_status = "DECLINED"
+
+            else:
+                final_message_detail = (
+                    result.get("reason")
+                    or result.get("raw_reason")
+                    or result.get("message")
+                    or "Your card was declined."
+                )
 
         # 🧹 Clean duplicate decline phrases like "Card declined (your card was declined)"
         final_message_detail = re.sub(
@@ -453,11 +480,20 @@ def process_manual_check(bot, message, allowed_users):
             top_status = "Declined ❌"
             emoji = "❌"
 
+        if sites_depleted:
+            top_status = "Declined ❌"
+            final_status = "DECLINED"
+            final_message_detail = termination_message
+            emoji = "❌"
+
         status_text = f"{final_status}{emoji}"
         if final_status == "3DS_REQUIRED":
             status_text = "⚠️ Requires Action"
         elif final_status == "INSUFFICIENT_FUNDS":
             status_text = "⚠️ Insufficient Funds"
+
+        if sites_depleted:
+            status_text = "Declined ❌"
 
         safe_raw_card = escape(raw_card_for_bin)
         final_msg = (

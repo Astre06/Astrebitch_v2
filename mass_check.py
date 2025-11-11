@@ -425,9 +425,19 @@ def run_mass_check_thread(bot, message, allowed_users=None):
 def handle_file(bot, message, allowed_users):
     chat_id = str(message.chat.id)
 
-    # --- Step 0: check if user still has active sites ---
-    from site_auth_manager import _load_state
+    def _get_active_sites():
+        try:
+            state = _load_state(chat_id)
+            return state.get(str(chat_id), {}).get("sites", {})
+        except Exception:
+            return {}
 
+    def _has_active_sites():
+        return bool(_get_active_sites())
+
+    all_sites_dead_announced = threading.Event()
+
+    # --- Step 0: check if user still has active sites ---
     try:
         state = _load_state(chat_id)
         user_sites = state.get(str(chat_id), {}).get("sites", {})
@@ -676,6 +686,25 @@ def handle_file(bot, message, allowed_users):
                             continue
 
                         card, result_site, result, elapsed = card_result
+                        termination_message = "All your sites have died during checking. Please add new ones."
+
+                        if not all_sites_dead_announced.is_set():
+                            no_sites_left = not _has_active_sites()
+                            result_reason = ""
+                            if isinstance(result, dict):
+                                result_reason = (result.get("reason") or "").strip()
+
+                            if no_sites_left or result_reason == termination_message:
+                                all_sites_dead_announced.set()
+                                safe_send_message(
+                                    bot,
+                                    chat_id,
+                                    termination_message,
+                                    parse_mode="HTML"
+                                )
+                                cancel_pending_futures()
+                                set_stop_event(chat_id)
+                                break
                         status = result.get("status", "DECLINED")
                         message_text = result.get("message", result.get("reason", "Unknown response."))
 
