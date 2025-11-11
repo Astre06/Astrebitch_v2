@@ -832,7 +832,7 @@ def handle_file(bot, message, allowed_users):
                                 elif status == "INSUFFICIENT_FUNDS":
                                     status_display = "⚠️ Insufficient Funds"
                                 detail_msg = (
-                                    f"<code><b>{top_status}</b></code>\n"
+                                    f"<b>{top_status}</b>\n"
                                     f"━━━━━━━━━━━━━━━━━━\n"
                                     f"<code>✧ <b>Card:</b></code> <code>{card}</code>\n"
                                     f"<code>✧ <b>Status:</b> {status_display}</code>\n"
@@ -1206,4 +1206,5 @@ def merge_livecc_user_files(user_id: str, max_workers: int = 5):
         json.dump(all_data, f, indent=2, ensure_ascii=False)
     logger.info(f"[MERGED LIVECC] Saved {len(all_data)} results to {merged_file}")
     return merged_file
+
 
