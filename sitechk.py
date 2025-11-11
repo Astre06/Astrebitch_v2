@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import CHANNEL_ID
-
+from bs4 import BeautifulSoup
 try:
     from fake_useragent import UserAgent  # type: ignore
 except Exception:  # pragma: no cover - fallback when library unavailable
@@ -128,52 +128,43 @@ def analyze_site_page(text: str) -> dict:
     }
 
 
-def register_new_account(register_url: str, session: requests.Session = None):
-    """
-    Lightweight WooCommerce registration that mirrors the working reference script.
-    Creates a random account and returns the authenticated session upon success.
-    """
-    if not register_url:
-        return None
+from bs4 import BeautifulSoup  # ← ADD THIS import
 
+def register_new_account(register_url: str, session: requests.Session = None):
     sess = session or requests.Session()
+    ua = get_user_agent()  # ← USE THIS SAFER CALL
+
+    # 1️⃣ GET the page to scrape hidden inputs
+    r_get = sess.get(register_url, headers={"User-Agent": ua}, timeout=15)
+    soup = BeautifulSoup(r_get.text, "html.parser")
+
+    # robust nonce extraction
+    nonce_tag = soup.find("input", {"name": "woocommerce-register-nonce"})
+    nonce_val = nonce_tag["value"] if nonce_tag and nonce_tag.has_attr("value") else ""
+    referer_val = "/my-account/"
+
+    data = {
+        "username": generate_random_username(),
+        "email": generate_random_email(),
+        "password": generate_random_string(12),
+        "woocommerce-register-nonce": nonce_val,
+        "_wp_http_referer": referer_val,
+        "register": "Register",
+    }
     headers = {
-        "User-Agent": get_user_agent(),
+        "User-Agent": ua,
         "Referer": register_url,
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    email = generate_random_email()
-    username = generate_random_username()
-    password = generate_random_string(12)
-    payload = {
-        "email": email,
-        "username": username,
-        "password": password,
-    }
 
-    try:
-        resp = sess.post(
-            register_url,
-            headers=headers,
-            data=payload,
-            timeout=15,
-            allow_redirects=True,
-        )
-    except Exception as exc:
-        logger.error(f"Registration request failed: {exc}")
-        return None
+    r_post = sess.post(register_url, headers=headers, data=data, timeout=15)
 
-    if resp.status_code in (200, 302):
-        sess._account_credentials = {
-            "email": email,
-            "username": username,
-            "password": password,
-        }
-        logger.info(f"[+] Registered new account {email} on {register_url}")
+    # 2️⃣ Verify login cookie or HTML text
+    if any("wordpress_logged_in" in c.name for c in sess.cookies) or "customer-logout" in r_post.text:
         return sess
-
-    logger.warning(f"Registration failed ({resp.status_code}) for {register_url}")
     return None
+
+
 
 
 def find_pk(payment_url: str, session: requests.Session = None) -> str | None:
@@ -635,3 +626,4 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Error: {html_escape(str(e))}",
             parse_mode=ParseMode.HTML
         )
+
