@@ -6,7 +6,6 @@ import re
 import html
 import time
 from user_agents import get_random_user_agent
-from woo_helpers import build_registration_payload, is_logged_in
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -36,9 +35,27 @@ def generate_random_username() -> str:
 # --- Replace or add these functions in sitechk.py ---
 
 def get_base_url(user_url: str) -> str:
+    """
+    Normalize arbitrary user-provided text to a clean https://domain.tld base URL.
+    Handles messy inputs like "Live > www.site.com text" by extracting first domain-like token.
+    """
     from urllib.parse import urlparse, urlunparse
-    parsed = urlparse(user_url if user_url.startswith(("http://", "https://")) else "https://" + user_url)
-    return urlunparse((parsed.scheme, parsed.netloc, '', '', '', ''))
+
+    if not user_url:
+        return ""
+
+    candidate = user_url.strip()
+    # Extract first domain-like token (handles leading words/numbers/symbols)
+    match = re.search(r'([a-z0-9-]+\.[a-z]{2,}(?:\.[a-z]{2,})?)', candidate.lower())
+    if not match:
+        return ""
+
+    domain = match.group(1)
+    if not domain.startswith(("http://", "https://")):
+        domain = "https://" + domain
+
+    parsed = urlparse(domain)
+    return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
 
 
 def analyze_site_page(text: str) -> dict:
@@ -67,9 +84,9 @@ def analyze_site_page(text: str) -> dict:
     }
 def register_new_account(register_url: str, session: requests.Session = None):
     """
-    Register a random account on the WooCommerce site.
-    Grabs dynamic form fields/nonce to avoid false negatives.
-    Returns a session seeded with cookies when successful.
+    Register a random account on the WooCommerce site by POSTing directly to /my-account/.
+    Simplified flow that mirrors proven working logic in production bot.
+    Returns a session with cookies when successful.
     """
     sess = session or requests.Session()
     user_agent = get_random_user_agent()
@@ -77,70 +94,41 @@ def register_new_account(register_url: str, session: requests.Session = None):
         "User-Agent": user_agent,
         "Referer": register_url,
         "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
-
     email = generate_random_email()
     username = generate_random_username()
     password = generate_random_string(12)
-    first_name = generate_random_string(6).title()
-    last_name = generate_random_string(6).title()
+
+    payload = {
+        "email": email,
+        "username": username,
+        "password": password,
+    }
 
     try:
-        resp = sess.get(register_url, headers=headers, timeout=15)
-    except Exception as e:
-        logger.error(f"Registration page fetch failed: {e}")
-        return None
-
-    html_text = resp.text or ""
-    payload = build_registration_payload(
-        html_text,
-        email=email,
-        username=username,
-        password=password,
-        first_name=first_name,
-        last_name=last_name,
-    )
-
-    if not payload:
-        logger.warning("[register_new_account] Unable to build registration payload (no fields detected)")
-        return None
-
-    try:
-        post_resp = sess.post(
+        resp = sess.post(
             register_url,
             headers=headers,
             data=payload,
-            timeout=20,
+            timeout=15,
             allow_redirects=True,
         )
-        if post_resp.status_code not in (200, 302):
-            logger.warning(f"Registration failed ({post_resp.status_code}): {post_resp.text[:300]}")
-            return None
-
-        html_after = post_resp.text or ""
-        if not html_after or not is_logged_in(html_after):
-            # Some themes redirect quietly—double check by loading account page.
-            try:
-                verify = sess.get(register_url, headers=headers, timeout=10)
-                if not is_logged_in(verify.text or ""):
-                    logger.warning("[register_new_account] Registration response does not indicate login")
-                    return None
-            except Exception:
-                logger.warning("[register_new_account] Verification request failed")
-                return None
-
-        logger.info(f"[+] Registered new account: {email} | {username}")
-        sess._account_credentials = {
-            "email": email,
-            "username": username,
-            "password": password,
-        }
-        sess.headers.update({"User-Agent": user_agent})
-        return sess
     except Exception as e:
-        logger.error(f"Exception during registration: {e}")
+        logger.error(f"Registration request failed: {e}")
         return None
+
+    if resp.status_code not in (200, 302):
+        logger.warning(f"Registration failed ({resp.status_code}) for {register_url}")
+        return None
+
+    logger.info(f"[+] Registered new account: {email} | {username}")
+    sess._account_credentials = {
+        "email": email,
+        "username": username,
+        "password": password,
+    }
+    sess.headers.update({"User-Agent": user_agent})
+    return sess
 
 
 def find_pk(payment_url: str, session: requests.Session = None) -> str | None:
@@ -398,6 +386,12 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     site_input = context.args[0].rstrip("/")
     base = get_base_url(site_input)
+    if not base:
+        await update.message.reply_text("❌ Invalid site URL provided.", parse_mode=ParseMode.HTML)
+        return
+
+    register_url = f"{base}/my-account/"
+    payment_url = f"{base}/my-account/add-payment-method/"
     card = context.args[1] if len(context.args) > 1 else DEFAULT_CARD
 
     # 🧭 Start the single editable message
@@ -418,16 +412,16 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress_msg.edit_text(f"✅ Site reachable ({response_time:.2f}s)\nAnalyzing...", parse_mode=ParseMode.HTML)
 
         # Step 2: Register account
-        session = register_new_account(base + "/my-account/")
+        session = register_new_account(register_url)
         if not session:
             await progress_msg.edit_text("❌ Account registration failed.", parse_mode=ParseMode.HTML)
             return
-        session.payment_page_url = base + "/my-account/add-payment-method/"
+        session.payment_page_url = payment_url
 
         # Step 3: Fetch payment page
         await progress_msg.edit_text(" Payment gateways...", parse_mode=ParseMode.HTML)
         page_html = session.get(
-            session.payment_page_url,
+            payment_url,
             headers={"User-Agent": get_random_user_agent()},
             timeout=15,
         ).text
@@ -435,7 +429,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Step 4: Find PK
         await progress_msg.edit_text("🔑 Searching for Stripe PK...", parse_mode=ParseMode.HTML)
-        pk_raw = find_pk(session.payment_page_url, session)
+        pk_raw = find_pk(payment_url, session)
         if not pk_raw:
             await progress_msg.edit_text("❌ PK not found.", parse_mode=ParseMode.HTML)
             return
