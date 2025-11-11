@@ -215,15 +215,23 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
 
         reason_text = result.get("reason") or result.get("message") or ""
         last_failure_reason = reason_text
-        potential_dead = _is_potential_dead(reason_text)
+        # Check both the site_dead flag and reason text for dead site detection
+        potential_dead = result.get("site_dead", False) or _is_potential_dead(reason_text)
 
         if potential_dead:
             if site_retry_counts[current_site] < 2:
                 print(f"[RETRY] {current_site} flagged as dead. Retrying once more to confirm.")
                 continue
 
-            print(f"[CONFIRM] Removing dead site after confirmation: {current_site}")
+            print(f"[CONFIRM] Removing dead site immediately: {current_site}")
             confirmed_dead_sites.append(current_site)
+            # 🧹 Remove dead site immediately so it won't be used by other cards
+            try:
+                removed = remove_user_site(chat_id, current_site, worker_id=worker_id)
+                if removed:
+                    print(f"[AUTO] Immediately removed dead site: {current_site}")
+            except Exception as e:
+                print(f"[AUTO] Error removing site {current_site} immediately: {e}")
             sites_queue.pop(0)
             continue
 
@@ -231,14 +239,15 @@ def try_process_with_retries(card_data, chat_id, user_proxy=None, worker_id=None
         last_site_used = site_url or current_site
         break
 
-    # 🧹 Clean up dead sites permanently
+    # 🧹 Safety net: Clean up any dead sites that weren't removed immediately
+    # (Most sites should already be removed above, but this ensures nothing is missed)
     for dead_site in confirmed_dead_sites:
         try:
             removed = remove_user_site(chat_id, dead_site, worker_id=worker_id)
             if removed:
-                print(f"[AUTO] Permanently removed dead site: {dead_site}")
+                print(f"[AUTO] Safety cleanup: Removed dead site: {dead_site}")
         except Exception as e:
-            print(f"[AUTO] Error removing site {dead_site}: {e}")
+            print(f"[AUTO] Error in safety cleanup for site {dead_site}: {e}")
 
     # 🧠 No site produced a valid response
     if last_site_used is None:
