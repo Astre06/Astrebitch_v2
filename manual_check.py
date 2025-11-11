@@ -291,12 +291,15 @@ def process_manual_check(bot, message, allowed_users):
         # Determine site number
         try:
             state = _load_state(chat_id)
-            user_sites = list(state.get(str(chat_id), {}).keys())
+            user_entry = state.get(str(chat_id), {})
+            user_sites = list(user_entry.get("sites", {}).keys())
+
             if not user_sites and not sites_depleted:
-                user_sites = [DEFAULT_API_URL]
-            if site_url in user_sites:
+                user_sites = [get_default_site()]
+
+            if site_url and site_url in user_sites and len(user_sites) > 1:
                 site_num = user_sites.index(site_url) + 1
-            if len(user_sites) <= 1:
+            else:
                 site_num = None
         except Exception:
             site_num = None
@@ -496,6 +499,9 @@ def process_manual_check(bot, message, allowed_users):
             status_text = "Declined ❌"
 
         safe_raw_card = escape(raw_card_for_bin)
+        proxy_state = "Live ✅" if result.get("_used_proxy", False) else "None"
+        site_suffix = f" <code>[{site_num}]</code>" if site_num else ""
+
         final_msg = (
             f"<b>{top_status}</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -506,7 +512,7 @@ def process_manual_check(bot, message, allowed_users):
             f"<code>✧ <b>Type:</b> {scheme} | {card_type} | {brand}</code>\n"
             f"<code>✧ <b>Bank:</b> {escape(bank)}</code>\n"
             f"<code>✧ <b>Country:</b> {escape(country)} {country_to_flag(country)}</code>\n"
-            f"<code>✧ <b>Proxy:</b> {'Live ✅' if result.get('_used_proxy', False) else 'None'}</code>{f'<code>[{site_num}]</code>'if site_num else ''}\n"
+            f"<code>✧ <b>Proxy:</b> {proxy_state}</code>{site_suffix}\n"
             f"<code>✧ <b>Checked by:</b> <b>{escape(username_display)}</b></code> <code>[</code><code>{chat_id}</code><code>]</code>\n"
             f"<code>✧ <b>Time:</b> {elapsed:.2f}s ⏳</code>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
